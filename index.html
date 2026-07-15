@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Test Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{--ink:#1f2a24;--paper:#faf7f0;--line:#d9d2c2;--accent:#c9622f;--pending:#8a8170;--pending-bg:#eee9dd;--done:#3d7a5c;--perfect:#3563a8;}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-tap-highlight-color:transparent;}
+.app{max-width:100%;min-height:100vh;display:flex;flex-direction:column;padding-bottom:24px;}
+header{padding:16px 16px 12px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--paper);z-index:20;}
+.eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:700;margin-bottom:4px;}
+h1{font-size:20px;margin:0 0 10px;font-weight:800;}
+.class-row{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;}
+.class-chip{flex:0 0 auto;padding:7px 14px;border-radius:20px;border:1px solid var(--line);background:white;font-size:13px;font-weight:600;color:var(--pending);cursor:pointer;}
+.class-chip.active{background:var(--accent);color:white;border-color:var(--accent);}
+.add-class{display:flex;gap:6px;margin-top:8px;}
+.add-class input{flex:1;font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;}
+section{padding:14px 16px;}
+.panel{background:white;border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px;}
+.panel h2{margin:0 0 10px;font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;}
+.row-f{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;}
+input[type=text],input[type=date],select{font-size:14px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:white;color:var(--ink);}
+button{border:none;cursor:pointer;font-family:inherit;font-weight:700;border-radius:8px;font-size:13px;padding:8px 12px;}
+.btn-main{background:var(--accent);color:white;}
+.btn-ghost{background:var(--pending-bg);color:var(--ink);}
+.btn-active{background:var(--perfect);color:white;}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;}
+.table-scroll{overflow-x:auto;border-radius:10px;border:1px solid var(--line);}
+table{border-collapse:collapse;width:100%;font-size:12px;}
+th,td{border:1px solid var(--line);padding:5px 7px;text-align:center;white-space:nowrap;}
+th{background:#f1ede1;font-size:11px;}
+th.test-hd{background:#e3ddd0;font-size:12px;}
+th.clickable{cursor:pointer;color:var(--accent);text-decoration:underline dotted;}
+th.p1h{background:#fffbe6;}
+th.p2h{background:#f0f8f0;}
+th.toth{background:#e8f4fd;}
+td.entered{font-weight:700;}
+td.computed{color:var(--pending);font-style:italic;}
+td.red-total{color:red;font-weight:700;}
+td:first-child{text-align:left;min-width:110px;}
+.del-btn{background:none;color:var(--pending);font-size:13px;padding:1px 4px;border-radius:4px;border:none;cursor:pointer;}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:50;padding:12px;}
+.modal-overlay.show{display:flex;}
+.modal{background:white;border-radius:14px;padding:16px;max-width:460px;width:100%;max-height:90vh;overflow-y:auto;}
+.modal h3{margin:0 0 8px;font-size:16px;}
+.modal p{font-size:13px;color:var(--pending);margin:0 0 10px;}
+.paper-toggle-row{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;}
+.stu-grid{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;}
+.stu-btn{padding:9px 14px;border-radius:10px;background:var(--pending-bg);color:var(--ink);font-size:13px;font-weight:600;border:none;cursor:pointer;}
+.score-display{font-size:36px;font-weight:800;text-align:center;padding:12px;background:var(--paper);border-radius:10px;margin:10px 0;color:var(--ink);}
+.mark-grid{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0;}
+.mark-btn{width:44px;height:44px;border-radius:8px;background:var(--pending-bg);color:var(--ink);font-size:13px;font-weight:700;padding:0;border:none;cursor:pointer;flex-shrink:0;}
+.mark-btn.sel{background:var(--accent);color:white;}
+.half-btn{padding:8px 18px;border-radius:8px;background:var(--pending-bg);color:var(--ink);}
+.half-btn.on{background:#6a4c9c;color:white;}
+footer{margin-top:auto;text-align:center;font-size:11px;color:var(--pending);padding:18px;}
+.empty-state{text-align:center;color:var(--pending);font-size:13px;padding:30px 10px;}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="eyebrow">Test Tracker</div>
+    <h1>Class test scores</h1>
+    <div class="btn-row">
+      <button class="btn-ghost" id="syncStatusBtn" onclick="showSyncPanel()">☁️ Sync: Off</button>
+      <button class="btn-ghost" id="deleteClassBtn" style="display:none" onclick="deleteActiveClass()">🗑 Delete class</button>
+    </div>
+    <div class="class-row" id="classRow"></div>
+    <div class="add-class">
+      <input type="text" id="newClassName" placeholder="New class name (e.g. P5 Science)">
+      <button class="btn-main" id="addClassBtn">Add class</button>
+    </div>
+  </header>
+  <section id="content"></section>
+  <footer>Data saved automatically · Synced via GitHub Gist when connected</footer>
+</div>
+<div class="modal-overlay" id="modalOverlay"><div class="modal" id="modalBody"></div></div>
+<canvas id="offscreenChart" style="display:none;"></canvas>
+<script>
+const STORAGE_KEY='testTrackerData_v1';
+const SYNC_CFG_KEY='testTrackerSyncCfg_v1';
+let state=loadState();
+let activeClassId=state.classOrder[0]||null;
+let mmTestId=null,mmPaper='p1a',mmStuId=null,mmScore=null,mmView='students';
+const PAPER_LABEL={'p1a':'Paper 1A','p1b':'Paper 1B','p2':'Paper 2'};
+const PAPER_MAX={'p1a':26,'p1b':25,'p2':55};
+
+function loadState(){
+  try{const r=localStorage.getItem(STORAGE_KEY);if(r){const p=JSON.parse(r);if(p&&p.classOrder)return p;}}catch(e){}
+  return{classOrder:[],classes:{}};
+}
+let saveTimer=null;
+function saveState(){
+  localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
+  if(syncToken&&syncGistId){clearTimeout(saveTimer);saveTimer=setTimeout(pushToCloud,800);}
+}
+function uid(p){return(p||'x')+'_'+Math.random().toString(36).slice(2,9);}
+function esc(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function escX(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[m]));}
+function showModal(html){document.getElementById('modalBody').innerHTML=html;document.getElementById('modalOverlay').classList.add('show');}
+function closeModal(){document.getElementById('modalOverlay').classList.remove('show');}
+function fmt(v){return(v===null||v===undefined)?'—':v;}
+
+// SYNC
+let syncToken='',syncGistId='',pollHandle=null,applyingRemote=false,lastRemoteJson=null;
+function loadSyncCfg(){try{const r=localStorage.getItem(SYNC_CFG_KEY);if(r)return JSON.parse(r);}catch(e){}return null;}
+function saveSyncCfg(c){localStorage.setItem(SYNC_CFG_KEY,JSON.stringify(c));}
+function initSync(){const c=loadSyncCfg();if(c&&c.token&&c.gistId)connectSync(c.token,c.gistId,true);}
+async function connectSync(token,gistId,silent){
+  syncToken=token.trim();gistId=(gistId||'').trim();
+  try{
+    if(!gistId){
+      const res=await fetch('https://api.github.com/gists',{method:'POST',
+        headers:{'Authorization':'token '+syncToken,'Content-Type':'application/json','Accept':'application/vnd.github+json'},
+        body:JSON.stringify({description:'Test Tracker data',public:false,
+          files:{'testTracker.json':{content:JSON.stringify({json:JSON.stringify(state),updatedAt:Date.now()})}}})});
+      if(!res.ok){const e=await res.json();throw new Error(e.message||'Status '+res.status);}
+      const d=await res.json();gistId=d.id;
+      alert('Sync database created!\n\nGist ID: '+gistId+'\n\nWrite this down — enter it on your other device to link them.');
+    }
+    syncGistId=gistId;saveSyncCfg({token:syncToken,gistId:syncGistId});
+    updateSyncBtn(true);
+    if(pollHandle)clearInterval(pollHandle);
+    await pollOnce();pollHandle=setInterval(pollOnce,5000);
+    if(!silent)closeModal();
+  }catch(err){console.warn(err);updateSyncBtn(false);if(!silent)alert('Could not connect.\n\n'+err.message);}
+}
+async function pollOnce(){
+  if(!syncToken||!syncGistId)return;
+  try{
+    const res=await fetch('https://api.github.com/gists/'+syncGistId,
+      {headers:{'Authorization':'token '+syncToken,'Accept':'application/vnd.github+json'}});
+    if(!res.ok)return;
+    const data=await res.json();
+    const file=data.files&&data.files['testTracker.json'];if(!file)return;
+    const record=JSON.parse(file.content);
+    const remoteJson=record&&record.json;if(!remoteJson)return;
+    if(remoteJson===lastRemoteJson)return;
+    const remoteState=JSON.parse(remoteJson);
+    if(remoteState.classOrder.length===0&&state.classOrder.length>0){lastRemoteJson=remoteJson;pushToCloud();return;}
+    lastRemoteJson=remoteJson;applyingRemote=true;
+    state=remoteState;
+    if(!state.classOrder.includes(activeClassId))activeClassId=state.classOrder[0]||null;
+    localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
+    renderAll();applyingRemote=false;
+  }catch(e){console.warn('Poll failed',e);}
+}
+async function pushToCloud(){
+  if(!syncToken||!syncGistId||applyingRemote)return;
+  const json=JSON.stringify(state);lastRemoteJson=json;
+  try{await fetch('https://api.github.com/gists/'+syncGistId,{method:'PATCH',
+    headers:{'Authorization':'token '+syncToken,'Content-Type':'application/json','Accept':'application/vnd.github+json'},
+    body:JSON.stringify({files:{'testTracker.json':{content:JSON.stringify({json,updatedAt:Date.now()})}}})});}
+  catch(e){console.warn('Push failed',e);}
+}
+function updateSyncBtn(on){const b=document.getElementById('syncStatusBtn');if(b)b.textContent=on?'☁️ Sync: On':'☁️ Sync: Off';}
+function showSyncPanel(){
+  const c=loadSyncCfg()||{};
+  showModal(`<h3>☁️ Sync between devices</h3>
+    <p>Create a GitHub Personal Access Token at:<br><b>github.com → Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token (classic)</b><br>Tick only the <b>gist</b> scope.</p>
+    <div style="margin-bottom:8px;"><input type="text" id="cfgToken" placeholder="GitHub token (ghp_...)" value="${esc(c.token||'')}" style="width:100%;font-size:12px;"></div>
+    <div style="margin-bottom:8px;"><input type="text" id="cfgGistId" placeholder="Gist ID (leave blank on first device)" value="${esc(c.gistId||'')}" style="width:100%;"></div>
+    <p style="font-size:11px;">Leave Gist ID blank on first device — app creates one and shows the ID. Enter same ID on other devices.</p>
+    <div class="btn-row"><button class="btn-ghost" onclick="closeModal()">Cancel</button><button class="btn-main" onclick="onConnectSync()">Connect</button></div>`);
+}
+function onConnectSync(){
+  const t=document.getElementById('cfgToken').value.trim();
+  const g=document.getElementById('cfgGistId').value.trim();
+  if(!t){alert('Please enter your GitHub token.');return;}
+  connectSync(t,g,false);
+}
+
+// CLASS
+function getClass(){return activeClassId?state.classes[activeClassId]:null;}
+function renderClassRow(){
+  const row=document.getElementById('classRow');row.innerHTML='';
+  state.classOrder.forEach(id=>{
+    const c=state.classes[id];const chip=document.createElement('div');
+    chip.className='class-chip'+(id===activeClassId?' active':'');
+    chip.textContent=c.name;chip.onclick=()=>{activeClassId=id;renderAll();};row.appendChild(chip);
+  });
+  const d=document.getElementById('deleteClassBtn');if(d)d.style.display=activeClassId?'inline-block':'none';
+}
+function addClass(name){
+  if(!name.trim())return;const id=uid('cls');
+  state.classes[id]={id,name:name.trim(),students:[],tests:[],marks:{}};
+  state.classOrder.push(id);activeClassId=id;saveState();renderAll();
+}
+function deleteActiveClass(){if(activeClassId)deleteClass(activeClassId);}
+function deleteClass(classId){
+  const c=state.classes[classId];if(!c)return;
+  if(!confirm(`⚠️ Delete "${c.name}"?\n\n• ${c.students.length} student(s)\n• ${c.tests.length} test(s)\n• All marks\n\nCannot be undone.`))return;
+  if(!confirm(`Final check — delete all data for "${c.name}"?`))return;
+  state.classOrder=state.classOrder.filter(id=>id!==classId);delete state.classes[classId];
+  activeClassId=state.classOrder[0]||null;saveState();renderAll();
+}
+
+// STUDENTS
+function addStudent(name){
+  const c=getClass();if(!c||!name.trim())return;
+  c.students.push({id:uid('stu'),name:name.trim()});saveState();renderTable();renderReportSel();
+}
+function deleteStudent(stuId){
+  const c=getClass();if(!c)return;
+  if(!confirm('Remove this student and all their marks?'))return;
+  c.students=c.students.filter(s=>s.id!==stuId);delete c.marks[stuId];saveState();renderTable();renderReportSel();
+}
+
+// TESTS
+function addTest(name,date){
+  const c=getClass();if(!c||!name.trim())return;
+  const id=uid('tst');c.tests.push({id,name:name.trim(),date:date||'',locked:false,hidden:false});
+  saveState();renderTable();
+}
+function deleteTest(testId){
+  const c=getClass();if(!c)return;
+  const t=c.tests.find(t=>t.id===testId);
+  if(t&&t.locked){alert('Column is locked. Tap 🔒 to unlock first.');return;}
+  if(!confirm(`Delete test "${t?t.name:''}" and all its marks?`))return;
+  c.tests=c.tests.filter(t=>t.id!==testId);
+  Object.keys(c.marks).forEach(sid=>{if(c.marks[sid])delete c.marks[sid][testId];});
+  saveState();renderTable();
+}
+function toggleTestLock(testId){
+  const c=getClass();const t=c&&c.tests.find(t=>t.id===testId);if(!t)return;
+  t.locked=!t.locked;saveState();renderTable();
+}
+function hideTest(testId){
+  const c=getClass();const t=c&&c.tests.find(t=>t.id===testId);if(!t)return;
+  if(!confirm(`Hide "${t.name}"? Data preserved.`))return;
+  t.hidden=true;saveState();renderTable();
+}
+function showUnhidePanel(){
+  const c=getClass();if(!c)return;
+  const hidden=c.tests.filter(t=>!!t.hidden).sort((a,b)=>b.date.localeCompare(a.date));
+  if(!hidden.length){alert('No hidden tests.');return;}
+  window._uhSel=new Set();
+  const btns=hidden.map(t=>`<div id="uhsel_${t.id}" onclick="toggleUhSel('${t.id}')" style="padding:10px 14px;border-radius:10px;border:2px solid var(--line);background:white;cursor:pointer;margin-bottom:8px;">
+    <div style="font-weight:700;">${esc(t.name)}</div>
+    <div style="font-size:12px;color:var(--pending);">${t.date||'No date'}</div></div>`).join('');
+  showModal(`<h3>Unhide tests</h3><p>Tap to select, then tap Unhide selected.</p>
+    <div>${btns}</div>
+    <div class="btn-row" style="margin-top:12px;">
+      <button class="btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn-main" onclick="confirmUnhide()">Unhide selected</button>
+    </div>`);
+}
+function toggleUhSel(id){
+  if(!window._uhSel)window._uhSel=new Set();
+  const el=document.getElementById('uhsel_'+id);
+  if(window._uhSel.has(id)){window._uhSel.delete(id);el.style.borderColor='var(--line)';el.style.background='white';}
+  else{window._uhSel.add(id);el.style.borderColor='var(--accent)';el.style.background='#fbe7df';}
+}
+function confirmUnhide(){
+  if(!window._uhSel||!window._uhSel.size){alert('No tests selected.');return;}
+  const c=getClass();if(!c)return;
+  const names=[...window._uhSel].map(id=>{const t=c.tests.find(t=>t.id===id);return t?t.name:'';}).filter(Boolean);
+  if(!confirm(`Unhide these tests?\n\n${names.join('\n')}`))return;
+  window._uhSel.forEach(id=>{const t=c.tests.find(t=>t.id===id);if(t)t.hidden=false;});
+  window._uhSel=new Set();saveState();closeModal();renderTable();
+}
+
+// MARKS
+function getMark(stuId,testId,paper){
+  const c=getClass();if(!c)return null;
+  const m=c.marks[stuId]&&c.marks[stuId][testId];if(!m)return null;
+  const v=m[paper];return(v===undefined||v===null)?null:v;
+}
+function setMarkData(stuId,testId,paper,value){
+  const c=getClass();if(!c)return;
+  if(!c.marks[stuId])c.marks[stuId]={};
+  if(!c.marks[stuId][testId])c.marks[stuId][testId]={};
+  if(value===null)delete c.marks[stuId][testId][paper];
+  else c.marks[stuId][testId][paper]=value;
+  saveState();
+}
+function getP1(stuId,testId){const a=getMark(stuId,testId,'p1a'),b=getMark(stuId,testId,'p1b');return(a===null||b===null)?null:a+b;}
+function getTotal(stuId,testId){const p1=getP1(stuId,testId),p2=getMark(stuId,testId,'p2');return(p1===null||p2===null)?null:p1+p2;}
+
+// RENDER
+function renderAll(){renderClassRow();renderContent();}
+function renderContent(){
+  const content=document.getElementById('content');const c=getClass();
+  if(!c){content.innerHTML='<div class="empty-state">Add a class above to get started.</div>';return;}
+  content.innerHTML=`
+    <div class="panel"><h2>Students</h2>
+      <div class="row-f"><input type="text" id="newStuName" placeholder="Student name" style="flex:1"><button class="btn-main" id="addStuBtn">Add</button></div></div>
+    <div class="panel"><h2>Add test</h2>
+      <div class="row-f">
+        <input type="text" id="newTestName" placeholder="Test name" style="flex:1">
+        <input type="date" id="newTestDate">
+        <button class="btn-main" id="addTestBtn">Add</button>
+        <button class="btn-ghost" id="unhideBtn">👁 Unhide</button>
+      </div></div>
+    <div class="panel"><h2>Score sheet</h2><div class="table-scroll" id="tableWrap"></div></div>
+    <div class="panel"><h2>Reports</h2>
+      <div class="row-f"><select id="reportStuSel"></select><button class="btn-ghost" id="genOneBtn">Word report (1 student)</button></div>
+      <div class="row-f"><button class="btn-main" id="genAllBtn">Word report (all students)</button></div></div>`;
+  document.getElementById('newTestDate').value=new Date().toISOString().slice(0,10);
+  document.getElementById('addStuBtn').onclick=()=>{const i=document.getElementById('newStuName');addStudent(i.value);i.value='';i.focus();};
+  document.getElementById('newStuName').addEventListener('keydown',e=>{if(e.key==='Enter'){addStudent(e.target.value);e.target.value='';}});
+  document.getElementById('addTestBtn').onclick=()=>{const n=document.getElementById('newTestName'),d=document.getElementById('newTestDate');addTest(n.value,d.value);n.value='';};
+  document.getElementById('unhideBtn').onclick=showUnhidePanel;
+  document.getElementById('genOneBtn').onclick=()=>{const s=document.getElementById('reportStuSel');if(!s.value){alert('Select a student.');return;}generateWordReport([s.value]);};
+  document.getElementById('genAllBtn').onclick=()=>{const c=getClass();if(!c||!c.students.length){alert('No students.');return;}generateWordReport(c.students.map(s=>s.id));};
+  renderTable();renderReportSel();
+}
+function renderReportSel(){
+  const sel=document.getElementById('reportStuSel');if(!sel)return;
+  const c=getClass();sel.innerHTML='';
+  (c?c.students:[]).forEach(s=>{const o=document.createElement('option');o.value=s.id;o.textContent=s.name;sel.appendChild(o);});
+}
+function renderTable(){
+  const wrap=document.getElementById('tableWrap');const c=getClass();
+  if(!c){wrap.innerHTML='';return;}
+  const visible=c.tests.filter(t=>!t.hidden);
+  if(!visible.length){wrap.innerHTML='<div class="empty-state">Add a test above to start recording marks.</div>';return;}
+  if(!c.students.length){wrap.innerHTML='<div class="empty-state">Add students above.</div>';return;}
+  let h='<table><thead><tr><th style="text-align:left;min-width:110px;">Student</th>';
+  visible.forEach(t=>{
+    const lk=!!t.locked;
+    h+=`<th colspan="5" class="test-hd">${esc(t.name)}<br><span style="font-weight:400;font-size:10px;color:var(--pending);">${t.date||''}</span>
+      <br><span style="display:inline-flex;gap:2px;margin-top:2px;">
+        <button class="btn-ghost" style="font-size:10px;padding:2px 5px;" onclick="toggleTestLock('${t.id}')">${lk?'🔒':'🔓'}</button>
+        <button class="btn-ghost" style="font-size:10px;padding:2px 5px;" onclick="hideTest('${t.id}')">👁 Hide</button>
+        ${lk?'':`<button class="btn-ghost" style="font-size:10px;padding:2px 5px;" onclick="deleteTest('${t.id}')">✕</button>`}
+      </span></th>`;
+  });
+  h+='</tr><tr>';
+  visible.forEach(t=>{
+    h+=`<th class="clickable p1h" onclick="openMarkEntry('${t.id}','p1a')">1A</th>
+        <th class="clickable p1h" onclick="openMarkEntry('${t.id}','p1b')">1B</th>
+        <th class="p1h" style="color:var(--done);">P1</th>
+        <th class="clickable p2h" onclick="openMarkEntry('${t.id}','p2')">P2</th>
+        <th class="toth" style="color:var(--perfect);">Total</th>`;
+  });
+  h+='</tr></thead><tbody>';
+  c.students.forEach(s=>{
+    h+=`<tr><td>${esc(s.name)} <button class="del-btn" onclick="deleteStudent('${s.id}')">✕</button></td>`;
+    visible.forEach(t=>{
+      const a=getMark(s.id,t.id,'p1a'),b=getMark(s.id,t.id,'p1b'),p1=getP1(s.id,t.id),p2=getMark(s.id,t.id,'p2'),tot=getTotal(s.id,t.id);
+      const totClass=tot!==null&&tot<50?'red-total':tot!==null?'entered':'computed';
+      h+=`<td class="${a!==null?'entered':''}">${fmt(a)}</td>
+          <td class="${b!==null?'entered':''}">${fmt(b)}</td>
+          <td class="${p1!==null?'entered':'computed'}">${fmt(p1)}</td>
+          <td class="${p2!==null?'entered':''}">${fmt(p2)}</td>
+          <td class="${totClass}">${fmt(tot)}</td>`;
+    });
+    h+='</tr>';
+  });
+  h+='</tbody></table>';wrap.innerHTML=h;
+}
+
+// MARK ENTRY MODAL
+function openMarkEntry(testId,paper){mmTestId=testId;mmPaper=paper;mmStuId=null;mmScore=null;mmView='students';renderMarkModal();}
+function renderMarkModal(){
+  const c=getClass();const t=c&&c.tests.find(t=>t.id===mmTestId);if(!t)return;
+  const toggles=['p1a','p1b','p2'].map(p=>`<button class="${p===mmPaper?'btn-active':'btn-ghost'} paper-toggle" style="font-size:12px;padding:7px 12px;" onclick="switchPaper('${p}')">${PAPER_LABEL[p]}</button>`).join('');
+  if(mmView==='students'){
+    const c=getClass();let stuBtns='';
+    c.students.forEach(s=>{
+      const v=getMark(s.id,mmTestId,mmPaper);
+      const badge=v!==null?` <span style="font-size:11px;color:var(--accent);">(${v})</span>`:'';
+      stuBtns+=`<button class="stu-btn" onclick="openMarkPicker('${s.id}')">${esc(s.name)}${badge}</button>`;
+    });
+    showModal(`<h3>${esc(t.name)}</h3>
+      <div class="paper-toggle-row">${toggles}</div>
+      <p>Tap a student to enter their ${PAPER_LABEL[mmPaper]} mark (max ${PAPER_MAX[mmPaper]}).</p>
+      <div class="stu-grid">${stuBtns}</div>
+      <div class="btn-row"><button class="btn-ghost" onclick="closeModal()">Close</button></div>`);
+  } else {
+    const s=getClass().students.find(s=>s.id===mmStuId);if(!s)return;
+    const maxM=PAPER_MAX[mmPaper];const display=mmScore===null?'—':mmScore;
+    const hasHalf=mmScore!==null&&mmScore%1===0.5;
+    let markBtns='';
+    for(let i=0;i<=maxM;i++){const isSel=mmScore!==null&&Math.floor(mmScore)===i;markBtns+=`<button class="mark-btn${isSel?' sel':''}" onclick="tapMark(${i})">${i}</button>`;}
+    showModal(`<h3>${esc(s.name)}</h3>
+      <div class="paper-toggle-row">${toggles}</div>
+      <div style="font-size:11px;color:var(--pending);margin-bottom:2px;">${PAPER_LABEL[mmPaper]} · max ${maxM}</div>
+      <div class="score-display">${display}</div>
+      <div class="btn-row" style="margin-bottom:8px;">
+        <button class="half-btn${hasHalf?' on':''}" onclick="tapHalf()">+0.5</button>
+        <button class="btn-ghost" onclick="clearScore()">Clear</button>
+        <button class="btn-ghost" onclick="doneWithStudent()">← Back</button>
+      </div>
+      <div class="mark-grid">${markBtns}</div>`);
+  }
+}
+function switchPaper(paper){if(mmView==='picker')commitScore();mmPaper=paper;if(mmView==='picker'){const v=getMark(mmStuId,mmTestId,mmPaper);mmScore=v!==null?v:null;}renderMarkModal();}
+function openMarkPicker(stuId){mmStuId=stuId;mmView='picker';const v=getMark(stuId,mmTestId,mmPaper);mmScore=v!==null?v:null;renderMarkModal();}
+function tapMark(val){mmScore=val;renderMarkModal();}
+function tapHalf(){if(mmScore===null)mmScore=0.5;else if(mmScore%1===0.5)mmScore=Math.floor(mmScore);else mmScore+=0.5;renderMarkModal();}
+function clearScore(){mmScore=null;renderMarkModal();}
+function commitScore(){if(mmStuId&&mmTestId){setMarkData(mmStuId,mmTestId,mmPaper,mmScore);renderTable();}}
+function doneWithStudent(){commitScore();mmView='students';mmStuId=null;mmScore=null;renderMarkModal();}
+
+// CHART
+function wrapCanvasText(ctx,text,maxWidth){
+  const words=text.split(' ');const lines=[];let cur='';
+  words.forEach(w=>{const t=cur?cur+' '+w:w;if(ctx.measureText(t).width<=maxWidth)cur=t;else{if(cur)lines.push(cur);cur=w;}});
+  if(cur)lines.push(cur);return lines.length?lines:[text];
+}
+function drawChart(canvas,stuId,tests){
+  const barW=26,barGap=2,grpGap=18,grpW=3*(barW+barGap)+grpGap;
+  const padL=38,padT=28,padB=85,padR=16,chartH=280,CHART_MAX=100;
+  canvas.width=Math.max(padL+tests.length*grpW+padR,200);canvas.height=padT+chartH+padB;
+  const ctx=canvas.getContext('2d');ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,canvas.height);
+  [0,25,50,75,100].forEach(v=>{
+    const y=padT+chartH-(v/CHART_MAX)*chartH;
+    ctx.strokeStyle='#000000';ctx.lineWidth=0.5;ctx.beginPath();ctx.moveTo(padL,y);ctx.lineTo(canvas.width-padR,y);ctx.stroke();
+    ctx.fillStyle='#000000';ctx.font='9px Arial';ctx.textAlign='right';ctx.fillText(v,padL-3,y+3);
+  });
+  ctx.strokeStyle='#000000';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(padL,padT);ctx.lineTo(padL,padT+chartH);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(canvas.width-padR,padT);ctx.lineTo(canvas.width-padR,padT+chartH);ctx.stroke();
+  tests.forEach((t,ti)=>{
+    const p1=getP1(stuId,t.id),p2=getMark(stuId,t.id,'p2'),tot=getTotal(stuId,t.id);
+    const gX=padL+ti*grpW;
+    const drawBar=(x,val,color)=>{
+      if(val===null){ctx.fillStyle='#ddd';ctx.fillRect(x,padT+chartH-3,barW,3);return;}
+      const bH=Math.max(2,(Math.min(val,CHART_MAX)/CHART_MAX)*chartH);
+      ctx.fillStyle=color;ctx.fillRect(x,padT+chartH-bH,barW,bH);
+      ctx.strokeStyle='#000000';ctx.lineWidth=1;ctx.strokeRect(x,padT+chartH-bH,barW,bH);
+      ctx.fillStyle='#000000';ctx.font='bold 9px Arial';ctx.textAlign='center';ctx.fillText(val,x+barW/2,padT+chartH-bH-4);
+    };
+    drawBar(gX,p1,'#FFE082');drawBar(gX+barW+barGap,p2,'#A5D6A7');drawBar(gX+2*(barW+barGap),tot,'#90CAF9');
+    const cx=gX+grpW/2-grpGap/2;
+    ctx.fillStyle='#000000';ctx.font='bold 9px Arial';ctx.textAlign='center';
+    const nameLines=wrapCanvasText(ctx,t.name,grpW-grpGap+8);
+    nameLines.forEach((line,li)=>ctx.fillText(line,cx,padT+chartH+16+li*12));
+    if(t.date){ctx.fillStyle='#000000';ctx.font='8px Arial';ctx.fillText(t.date,cx,padT+chartH+16+nameLines.length*12+2);}
+  });
+  const items=[['Paper 1','#FFE082'],['Paper 2','#A5D6A7'],['Total','#90CAF9']];let lx=padL;
+  items.forEach(([lbl,col])=>{ctx.fillStyle=col;ctx.fillRect(lx,canvas.height-14,14,11);ctx.strokeStyle='#000000';ctx.lineWidth=1;ctx.strokeRect(lx,canvas.height-14,14,11);ctx.fillStyle='#000000';ctx.font='9px Arial';ctx.textAlign='left';ctx.fillText(lbl,lx+17,canvas.height-4);lx+=72;});
+}
+
+// WORD REPORT
+function dp(text,opts){
+  opts=opts||{};const rp=[];if(opts.bold)rp.push('<w:b/>');if(opts.size)rp.push(`<w:sz w:val="${opts.size}"/><w:szCs w:val="${opts.size}"/>`);
+  const rPr=rp.length?`<w:rPr>${rp.join('')}</w:rPr>`:'';const pPr=(opts.bold||opts.size)?`<w:pPr><w:rPr>${rp.join('')}</w:rPr></w:pPr>`:'';
+  return`<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${escX(text)}</w:t></w:r></w:p>`;
+}
+function pageBreak(){return`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`;}
+function dtable(headers,rows,colWidths){
+  const cell=(txt,bold,colW)=>{const wXml=colW?`<w:tcW w:w="${colW}" w:type="dxa"/>`:'';
+    return`<w:tc><w:tcPr>${wXml}<w:tcBorders><w:top w:val="single" w:sz="4" w:color="000000"/><w:left w:val="single" w:sz="4" w:color="000000"/><w:bottom w:val="single" w:sz="4" w:color="000000"/><w:right w:val="single" w:sz="4" w:color="000000"/></w:tcBorders></w:tcPr>
+    <w:p><w:pPr><w:spacing w:before="0" w:after="60"/></w:pPr><w:r><w:rPr>${bold?'<w:b/>':''}<w:sz w:val="20"/></w:rPr><w:t xml:space="preserve">${escX(String(txt))}</w:t></w:r></w:p></w:tc>`;};
+  const cw=colWidths||[];const totalW=cw.reduce((a,b)=>a+b,0)||9000;
+  const tblGrid=cw.length?`<w:tblGrid>${cw.map(w=>`<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>`:'';
+  return`<w:tbl><w:tblPr><w:tblW w:w="${totalW}" w:type="dxa"/><w:tblLayout w:type="fixed"/></w:tblPr>${tblGrid}
+    <w:tr>${headers.map((h,i)=>cell(h,true,cw[i])).join('')}</w:tr>
+    ${rows.map(r=>`<w:tr>${r.map((c,i)=>cell(c,false,cw[i])).join('')}</w:tr>`).join('')}</w:tbl>`;
+}
+function dimg(relId,wE,hE,idx){
+  return`<w:p><w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0">
+  <wp:extent cx="${wE}" cy="${hE}"/><wp:docPr id="${idx}" name="Chart${idx}"/>
+  <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+    <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+      <pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+        <pic:nvPicPr><pic:cNvPr id="0" name="Chart${idx}"/><pic:cNvPicPr/></pic:nvPicPr>
+        <pic:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>
+        <pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${wE}" cy="${hE}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>
+      </pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
+}
+const sigBlock=`<w:tbl><w:tblPr><w:tblW w:w="9638" w:type="dxa"/><w:tblLayout w:type="fixed"/>
+  <w:tblBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="none"/><w:right w:val="none"/><w:insideH w:val="none"/><w:insideV w:val="none"/></w:tblBorders></w:tblPr>
+  <w:tblGrid><w:gridCol w:w="1400"/><w:gridCol w:w="8238"/></w:tblGrid>
+  <w:tr><w:trPr><w:cantSplit/></w:trPr>
+    <w:tc><w:tcPr><w:tcW w:w="9638" w:type="dxa"/><w:gridSpan w:val="2"/>
+      <w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="none"/><w:right w:val="none"/></w:tcBorders></w:tcPr>
+      <w:p><w:r><w:rPr><w:b/><w:sz w:val="20"/></w:rPr><w:t>Parent / Guardian Acknowledgement</w:t></w:r></w:p></w:tc></w:tr>
+  <w:tr><w:trPr><w:cantSplit/></w:trPr>
+    <w:tc><w:tcPr><w:tcW w:w="1400" w:type="dxa"/>
+      <w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="none"/></w:tcBorders></w:tcPr>
+      <w:p><w:pPr><w:spacing w:before="400" w:after="0"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/></w:rPr><w:t>Signature:</w:t></w:r></w:p></w:tc>
+    <w:tc><w:tcPr><w:tcW w:w="8238" w:type="dxa"/>
+      <w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="none"/></w:tcBorders></w:tcPr>
+      <w:p><w:pPr><w:spacing w:before="400" w:after="0"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/></w:rPr><w:t xml:space="preserve"> </w:t></w:r></w:p></w:tc></w:tr>
+  <w:tr><w:trPr><w:cantSplit/></w:trPr>
+    <w:tc><w:tcPr><w:tcW w:w="1400" w:type="dxa"/>
+      <w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="none"/></w:tcBorders></w:tcPr>
+      <w:p><w:pPr><w:spacing w:before="400" w:after="0"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/></w:rPr><w:t>Date:</w:t></w:r></w:p></w:tc>
+    <w:tc><w:tcPr><w:tcW w:w="8238" w:type="dxa"/>
+      <w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="none"/></w:tcBorders></w:tcPr>
+      <w:p><w:pPr><w:spacing w:before="400" w:after="0"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/></w:rPr><w:t xml:space="preserve"> </w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>`;
+
+async function generateWordReport(stuIds){
+  const c=getClass();if(!c||!c.tests.length){alert('No tests yet.');return;}
+  const visible=c.tests.filter(t=>!t.hidden);
+  const canvas=document.getElementById('offscreenChart');
+  const paragraphs=[],imageRels=[],imageFiles=[];let relIdx=2;
+  for(let si=0;si<stuIds.length;si++){
+    const stuId=stuIds[si];const s=c.students.find(st=>st.id===stuId);if(!s)continue;
+    if(si>0)paragraphs.push(pageBreak());
+    paragraphs.push(dp('Test Score Report',{bold:true,size:32}));
+    paragraphs.push(dp(`Student: ${s.name}`,{bold:true}));
+    paragraphs.push(dp(`Class: ${c.name}`));
+    paragraphs.push(dp(`Date: ${new Date().toLocaleDateString()}`));
+    paragraphs.push(dp(''));
+    const hdrs=['Test','Date','Paper 1A','Paper 1B','Paper 1','Paper 2','Total'];
+    const rows=visible.map(t=>[t.name,t.date||'',fmt(getMark(stuId,t.id,'p1a')),fmt(getMark(stuId,t.id,'p1b')),fmt(getP1(stuId,t.id)),fmt(getMark(stuId,t.id,'p2')),fmt(getTotal(stuId,t.id))]);
+    paragraphs.push(dtable(hdrs,rows,[2200,1200,850,850,850,850,800]));
+    paragraphs.push(dp(''));paragraphs.push(dp('Performance chart',{bold:true}));
+    drawChart(canvas,stuId,visible);
+    const b64=canvas.toDataURL('image/png').split(',')[1];
+    const fname=`chart_${si}.png`,relId=`rId${relIdx++}`;
+    imageFiles.push({name:fname,data:b64});imageRels.push({id:relId,target:`media/${fname}`});
+    const wE=Math.min(canvas.width*9525,6124800),hE=Math.round(wE*canvas.height/canvas.width);
+    paragraphs.push(dimg(relId,wE,hE,si+1));
+    paragraphs.push(dp(''));paragraphs.push(sigBlock);
+  }
+  const ctXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`;
+  const relsXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`;
+  const docRelsXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${imageRels.map(r=>`<Relationship Id="${r.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${r.target}"/>`).join('')}</Relationships>`;
+  const docXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>${paragraphs.join('\n')}<w:sectPr><w:pgMar w:top="720" w:right="1440" w:bottom="720" w:left="1440"/></w:sectPr></w:body></w:document>`;
+  const zip=new JSZip();zip.file('[Content_Types].xml',ctXml);zip.folder('_rels').file('.rels',relsXml);
+  const wf=zip.folder('word');wf.file('document.xml',docXml);wf.folder('_rels').file('document.xml.rels',docRelsXml);
+  const mf=wf.folder('media');imageFiles.forEach(f=>mf.file(f.name,f.data,{base64:true}));
+  const blob=await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+  const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;
+  const fname=stuIds.length===1?(c.students.find(s=>s.id===stuIds[0])?.name||'student').replace(/[^a-z0-9]/gi,'_'):c.name.replace(/[^a-z0-9]/gi,'_')+'_all';
+  a.download=`${fname}_test_report.docx`;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
+}
+
+// INIT
+document.getElementById('addClassBtn').onclick=()=>{const i=document.getElementById('newClassName');addClass(i.value);i.value='';};
+document.getElementById('newClassName').addEventListener('keydown',e=>{if(e.key==='Enter'){addClass(e.target.value);e.target.value='';}});
+renderAll();
+initSync();
+</script>
+</body>
+</html>
