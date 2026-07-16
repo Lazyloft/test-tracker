@@ -40,7 +40,7 @@ th.toth{background:#e8f4fd;}
 td.entered{font-weight:700;}
 td.computed{color:var(--pending);font-style:italic;}
 td.red-total{color:red;font-weight:700;}
-td:first-child{text-align:left;min-width:110px;}
+td:first-child{text-align:left;min-width:80px;width:80px;}
 .del-btn{background:none;color:var(--pending);font-size:13px;padding:1px 4px;border-radius:4px;border:none;cursor:pointer;}
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:50;padding:12px;}
 .modal-overlay.show{display:flex;}
@@ -792,10 +792,9 @@ function renderTable(){
   if(!visible.length){wrap.innerHTML='<div class="empty-state">Add a test above to start recording marks.</div>';return;}
   if(!c.students.length){wrap.innerHTML='<div class="empty-state">Add students above.</div>';return;}
   
-  // Build the table with proper alignment
   let h = '<table><thead>';
-  // First row: student column + test headers spanning 5 columns each
-  h += '<tr><th style="text-align:left;min-width:110px;">Student</th>';
+  // First row: student header with rowspan=2, then test headers spanning 5 columns
+  h += '<tr><th rowspan="2" style="text-align:left;width:80px;min-width:80px;">Student</th>';
   visible.forEach(t => {
     const lk = !!t.locked;
     h += `<th colspan="5" class="test-hd">${esc(t.name)}<br><span style="font-weight:400;font-size:10px;color:var(--pending);">${t.date||''}</span>
@@ -807,7 +806,7 @@ function renderTable(){
   });
   h += '</tr>';
   
-  // Second row: sub-headers for each test's 5 columns
+  // Second row: sub-headers for each test, no student cell because of rowspan
   h += '<tr>';
   visible.forEach(t => {
     h += `<th class="clickable p1h" onclick="openMarkEntry('${t.id}','p1a')">1A</th>
