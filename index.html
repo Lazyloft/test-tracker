@@ -573,4 +573,380 @@ function drawHistogram(canvas, testId) {
   const ctx = canvas.getContext('2d');
   
   const barWidth = (canvasWidth - 80) / bins.length;
-  const maxBarHeight = canvasHeight
+  const maxBarHeight = canvasHeight - 60;
+  
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+  
+  const colors = ['#e8d5b7','#d4b896','#c09b75','#ac7e54','#986133','#845012','#6f3f0a','#5a2e04','#451d00','#300c00'];
+  bins.forEach((freq, i) => {
+    const x = 40 + i * barWidth;
+    const height = maxFreq > 0 ? maxBarHeight * (freq / maxFreq) : 0;
+    const y = canvasHeight - 20 - height;
+    
+    ctx.fillStyle = colors[i % colors.length];
+    ctx.fillRect(x, y, barWidth - 2, height);
+    ctx.strokeStyle = '#1f2a24';
+    ctx.lineWidth = 0.5;
+    ctx.strokeRect(x, y, barWidth - 2, height);
+    
+    ctx.fillStyle = '#1f2a24';
+    ctx.font = '9px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(freq, x + barWidth/2, y - 5);
+    ctx.fillText(`${i*10}-${(i+1)*10}`, x + barWidth/2, canvasHeight - 4);
+  });
+  
+  ctx.strokeStyle = '#1f2a24';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(40, canvasHeight - 20);
+  ctx.lineTo(canvasWidth - 10, canvasHeight - 20);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(40, canvasHeight - 20);
+  ctx.lineTo(40, 10);
+  ctx.stroke();
+}
+
+// =============== ANALYTICS UI ===============
+
+function showStudentAnalytics(studentId) {
+  const stats = getStudentStats(studentId);
+  if (!stats) {
+    alert('No data available for this student.');
+    return;
+  }
+  
+  const s = stats.student;
+  const grade = stats.avg >= 80 ? 'A' : stats.avg >= 65 ? 'B' : stats.avg >= 50 ? 'C' : stats.avg >= 40 ? 'D' : 'F';
+  const trendIcon = stats.trend > 0 ? '📈' : stats.trend < 0 ? '📉' : '➡️';
+  const trendColor = stats.trend > 0 ? 'var(--done)' : stats.trend < 0 ? '#c9622f' : 'var(--pending)';
+  
+  let html = `
+    <h3>📊 ${esc(s.name)} - Performance Analysis</h3>
+    <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(100px,1fr));">
+      <div class="stat-card"><div class="stat-label">Average</div><div class="stat-value">${stats.avg.toFixed(1)}</div></div>
+      <div class="stat-card"><div class="stat-label">Median</div><div class="stat-value">${stats.median}</div></div>
+      <div class="stat-card"><div class="stat-label">Highest</div><div class="stat-value">${stats.max}</div></div>
+      <div class="stat-card"><div class="stat-label">Lowest</div><div class="stat-value">${stats.min}</div></div>
+      <div class="stat-card"><div class="stat-label">Grade</div><div class="stat-value" style="color:${grade==='A'?'var(--done)':grade==='F'?'red':'var(--accent)'};">${grade}</div></div>
+      <div class="stat-card"><div class="stat-label">vs Class Avg</div><div class="stat-value" style="color:${stats.aboveAverage?'var(--done)':'red'};">${stats.aboveAverage?'+'+ (stats.avg - stats.classAvg).toFixed(1) : (stats.avg - stats.classAvg).toFixed(1)}</div></div>
+    </div>
+    <div style="background:${trendColor}20;padding:10px;border-radius:8px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-weight:700;color:${trendColor};">${trendIcon} Trend: ${stats.trend > 0 ? 'Improving' : stats.trend < 0 ? 'Declining' : 'Stable'}</span>
+      <span style="font-size:13px;color:${trendColor};">${stats.trend >= 0 ? '+' : ''}${stats.trend.toFixed(1)} points overall</span>
+    </div>
+    <div class="chart-container">
+      <canvas id="progressChartCanvas" width="500" height="250"></canvas>
+    </div>
+    <div class="btn-row">
+      <button class="btn-ghost" onclick="closeModal()">Close</button>
+      <button class="btn-main" onclick="generateWordReport(['${studentId}'])">📄 Generate Report</button>
+    </div>
+  `;
+  showModal(html);
+  
+  setTimeout(() => {
+    const canvas = document.getElementById('progressChartCanvas');
+    if (canvas) drawProgressChart(canvas, studentId);
+  }, 50);
+}
+
+function showClassAnalytics() {
+  const stats = getClassStats();
+  if (!stats) {
+    alert('Not enough data for analytics. Add students and tests first.');
+    return;
+  }
+  
+  const gradeColors = {'A':'#3d7a5c','B':'#5a9e7a','C':'#c9622f','D':'#e8a87c','F':'#d9534f'};
+  const totalGrades = stats.gradeDistribution.A + stats.gradeDistribution.B + stats.gradeDistribution.C + stats.gradeDistribution.D + stats.gradeDistribution.F;
+  const gradeBars = Object.keys(stats.gradeDistribution).map(g => {
+    const pct = totalGrades > 0 ? (stats.gradeDistribution[g] / totalGrades * 100) : 0;
+    return `<div class="grade-segment" style="width:${pct}%;background:${gradeColors[g]};">${pct > 5 ? g : ''}</div>`;
+  }).join('');
+  
+  // Student ranking
+  const sortedStudents = Object.keys(stats.studentAverages).sort((a,b) => stats.studentAverages[b].avg - stats.studentAverages[a].avg);
+  const rankList = sortedStudents.slice(0, 10).map((id, idx) => {
+    const s = stats.studentAverages[id];
+    const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx+1}.`;
+    return `<div class="student-rank ${idx < 3 ? 'rank-'+(idx+1) : ''}">
+      <span><span class="rank-num">${medal}</span> ${esc(s.name)}</span>
+      <span class="rank-score">${s.avg.toFixed(1)}</span>
+    </div>`;
+  }).join('');
+  
+  let html = `
+    <h3>📈 Class Analytics - ${esc(getClass().name)}</h3>
+    <div class="tab-row">
+      <button class="tab-btn ${analyticsTab === 'overview' ? 'active' : ''}" onclick="switchAnalyticsTab('overview')">Overview</button>
+      <button class="tab-btn ${analyticsTab === 'ranking' ? 'active' : ''}" onclick="switchAnalyticsTab('ranking')">Ranking</button>
+      <button class="tab-btn ${analyticsTab === 'distribution' ? 'active' : ''}" onclick="switchAnalyticsTab('distribution')">Distribution</button>
+    </div>
+    <div id="analyticsContent">
+  `;
+  
+  if (analyticsTab === 'overview') {
+    html += `
+      <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));">
+        <div class="stat-card"><div class="stat-label">Class Average</div><div class="stat-value">${stats.classAverage.toFixed(1)}</div></div>
+        <div class="stat-card"><div class="stat-label">Pass Rate</div><div class="stat-value">${stats.passRate.toFixed(1)}%</div></div>
+        <div class="stat-card"><div class="stat-label">Median</div><div class="stat-value">${stats.median}</div></div>
+        <div class="stat-card"><div class="stat-label">Std Dev</div><div class="stat-value">${stats.stdDev.toFixed(1)}</div></div>
+        <div class="stat-card"><div class="stat-label">Top Score</div><div class="stat-value">${stats.topScore}</div></div>
+        <div class="stat-card"><div class="stat-label">Low Score</div><div class="stat-value">${stats.lowScore}</div></div>
+      </div>
+      <div style="margin-top:8px;">
+        <div style="font-size:11px;color:var(--pending);margin-bottom:4px;">Grade Distribution</div>
+        <div class="grade-bar">${gradeBars}</div>
+        <div style="display:flex;gap:8px;margin-top:4px;font-size:10px;flex-wrap:wrap;">
+          ${Object.keys(stats.gradeDistribution).map(g => `<span><span style="display:inline-block;width:12px;height:12px;background:${gradeColors[g]};border-radius:2px;"></span> ${g}: ${stats.gradeDistribution[g]}</span>`).join('')}
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <div style="font-size:11px;color:var(--pending);margin-bottom:4px;">Top Performer</div>
+        <div style="font-size:18px;font-weight:800;">${stats.topPerformer ? esc(stats.topPerformer.name) : '—'} <span style="font-size:14px;color:var(--accent);">(${stats.topPerformer ? stats.topPerformer.avg.toFixed(1) : ''})</span></div>
+      </div>
+    `;
+  } else if (analyticsTab === 'ranking') {
+    html += `<div style="max-height:300px;overflow-y:auto;">${rankList}</div>`;
+  } else if (analyticsTab === 'distribution') {
+    const c = getClass();
+    const visibleTests = c.tests.filter(t => !t.hidden);
+    html += `<div style="margin-bottom:8px;"><select id="histTestSelect" onchange="updateHistogram()" style="width:100%;">`;
+    visibleTests.forEach(t => {
+      html += `<option value="${t.id}">${esc(t.name)}</option>`;
+    });
+    html += `</select></div>`;
+    html += `<div class="chart-container"><canvas id="histogramCanvas" width="500" height="250"></canvas></div>`;
+    html += `<script>setTimeout(updateHistogram, 50);<\/script>`;
+  }
+  
+  html += `</div><div class="btn-row"><button class="btn-ghost" onclick="closeModal()">Close</button></div>`;
+  showModal(html);
+  
+  if (analyticsTab === 'distribution') {
+    window.updateHistogram = function() {
+      const sel = document.getElementById('histTestSelect');
+      if (!sel) return;
+      const canvas = document.getElementById('histogramCanvas');
+      if (canvas) drawHistogram(canvas, sel.value);
+    };
+  }
+}
+
+function switchAnalyticsTab(tab) {
+  analyticsTab = tab;
+  showClassAnalytics();
+}
+
+// RENDER
+function renderAll(){renderClassRow();renderContent();}
+function renderContent(){
+  const content=document.getElementById('content');const c=getClass();
+  if(!c){content.innerHTML='<div class="empty-state">Add a class above to get started.</div>';return;}
+  content.innerHTML=`
+    <div class="panel"><h2>Students</h2>
+      <div class="row-f"><input type="text" id="newStuName" placeholder="Student name" style="flex:1"><button class="btn-main" id="addStuBtn">Add</button></div></div>
+    <div class="panel"><h2>Add test</h2>
+      <div class="row-f">
+        <input type="text" id="newTestName" placeholder="Test name" style="flex:1">
+        <input type="date" id="newTestDate">
+        <button class="btn-main" id="addTestBtn">Add</button>
+        <button class="btn-ghost" id="unhideBtn">👁 Unhide</button>
+      </div></div>
+    <div class="panel"><h2>📊 Analytics</h2>
+      <div class="btn-row">
+        <button class="btn-main" onclick="showClassAnalytics()">📈 Class Analytics</button>
+        <button class="btn-ghost" onclick="exportAnalyticsCSV()">📤 Export CSV</button>
+      </div>
+    </div>
+    <div class="panel"><h2>Score sheet</h2><div class="table-scroll" id="tableWrap"></div></div>
+    <div class="panel"><h2>Reports</h2>
+      <div class="row-f"><select id="reportStuSel"></select><button class="btn-ghost" id="genOneBtn">Word report (1 student)</button></div>
+      <div class="row-f"><button class="btn-main" id="genAllBtn">Word report (all students)</button></div>
+      <div class="row-f" style="margin-top:8px;">
+        <button class="btn-ghost" onclick="showStudentAnalytics(document.getElementById('reportStuSel').value)">📊 Student Analytics</button>
+      </div>
+    </div>`;
+  document.getElementById('newTestDate').value=new Date().toISOString().slice(0,10);
+  document.getElementById('addStuBtn').onclick=()=>{const i=document.getElementById('newStuName');addStudent(i.value);i.value='';i.focus();};
+  document.getElementById('newStuName').addEventListener('keydown',e=>{if(e.key==='Enter'){addStudent(e.target.value);e.target.value='';}});
+  document.getElementById('addTestBtn').onclick=()=>{const n=document.getElementById('newTestName'),d=document.getElementById('newTestDate');addTest(n.value,d.value);n.value='';};
+  document.getElementById('unhideBtn').onclick=showUnhidePanel;
+  document.getElementById('genOneBtn').onclick=()=>{const s=document.getElementById('reportStuSel');if(!s.value){alert('Select a student.');return;}generateWordReport([s.value]);};
+  document.getElementById('genAllBtn').onclick=()=>{const c=getClass();if(!c||!c.students.length){alert('No students.');return;}generateWordReport(c.students.map(s=>s.id));};
+  renderTable();renderReportSel();
+}
+function renderReportSel(){
+  const sel=document.getElementById('reportStuSel');if(!sel)return;
+  const c=getClass();sel.innerHTML='';
+  (c?c.students:[]).forEach(s=>{const o=document.createElement('option');o.value=s.id;o.textContent=s.name;sel.appendChild(o);});
+}
+function renderTable(){
+  const wrap=document.getElementById('tableWrap');const c=getClass();
+  if(!c){wrap.innerHTML='';return;}
+  const visible=c.tests.filter(t=>!t.hidden);
+  if(!visible.length){wrap.innerHTML='<div class="empty-state">Add a test above to start recording marks.</div>';return;}
+  if(!c.students.length){wrap.innerHTML='<div class="empty-state">Add students above.</div>';return;}
+  let h='<table><thead><tr><th style="text-align:left;min-width:110px;">Student</th>';
+  visible.forEach(t=>{
+    const lk=!!t.locked;
+    h+=`<th colspan="5" class="test-hd">${esc(t.name)}<br><span style="font-weight:400;font-size:10px;color:var(--pending);">${t.date||''}</span>
+      <br><span style="display:inline-flex;gap:2px;margin-top:2px;">
+        <button class="btn-ghost" style="font-size:10px;padding:2px 5px;" onclick="toggleTestLock('${t.id}')">${lk?'🔒':'🔓'}</button>
+        <button class="btn-ghost" style="font-size:10px;padding:2px 5px;" onclick="hideTest('${t.id}')">👁 Hide</button>
+        ${lk?'':`<button class="btn-ghost" style="font-size:10px;padding:2px 5px;" onclick="deleteTest('${t.id}')">✕</button>`}
+      </span></th>`;
+  });
+  h+='</tr><tr>';
+  visible.forEach(t=>{
+    h+=`<th class="clickable p1h" onclick="openMarkEntry('${t.id}','p1a')">1A</th>
+        <th class="clickable p1h" onclick="openMarkEntry('${t.id}','p1b')">1B</th>
+        <th class="p1h" style="color:var(--done);">P1</th>
+        <th class="clickable p2h" onclick="openMarkEntry('${t.id}','p2')">P2</th>
+        <th class="toth" style="color:var(--perfect);">Total</th>`;
+  });
+  h+='</tr></thead><tbody>';
+  c.students.forEach(s=>{
+    h+=`<tr><td>${esc(s.name)} <button class="del-btn" onclick="deleteStudent('${s.id}')">✕</button></td>`;
+    visible.forEach(t=>{
+      const a=getMark(s.id,t.id,'p1a'),b=getMark(s.id,t.id,'p1b'),p1=getP1(s.id,t.id),p2=getMark(s.id,t.id,'p2'),tot=getTotal(s.id,t.id);
+      const totClass=tot!==null&&tot<50?'red-total':tot!==null?'entered':'computed';
+      h+=`<td class="${a!==null?'entered':''}">${fmt(a)}</td>
+          <td class="${b!==null?'entered':''}">${fmt(b)}</td>
+          <td class="${p1!==null?'entered':'computed'}">${fmt(p1)}</td>
+          <td class="${p2!==null?'entered':''}">${fmt(p2)}</td>
+          <td class="${totClass}">${fmt(tot)}</td>`;
+    });
+    h+='</tr>';
+  });
+  h+='</tbody></table>';wrap.innerHTML=h;
+}
+
+// MARK ENTRY MODAL
+function openMarkEntry(testId,paper){mmTestId=testId;mmPaper=paper;mmStuId=null;mmScore=null;mmView='students';renderMarkModal();}
+function renderMarkModal(){
+  const c=getClass();const t=c&&c.tests.find(t=>t.id===mmTestId);if(!t)return;
+  const toggles=['p1a','p1b','p2'].map(p=>`<button class="${p===mmPaper?'btn-active':'btn-ghost'} paper-toggle" style="font-size:12px;padding:7px 12px;" onclick="switchPaper('${p}')">${PAPER_LABEL[p]}</button>`).join('');
+  if(mmView==='students'){
+    const c=getClass();let stuBtns='';
+    c.students.forEach(s=>{
+      const v=getMark(s.id,mmTestId,mmPaper);
+      const badge=v!==null?` <span style="font-size:11px;color:var(--accent);">(${v})</span>`:'';
+      stuBtns+=`<button class="stu-btn" onclick="openMarkPicker('${s.id}')">${esc(s.name)}${badge}</button>`;
+    });
+    showModal(`<h3>${esc(t.name)}</h3>
+      <div class="paper-toggle-row">${toggles}</div>
+      <p>Tap a student to enter their ${PAPER_LABEL[mmPaper]} mark (max ${PAPER_MAX[mmPaper]}).</p>
+      <div class="stu-grid">${stuBtns}</div>
+      <div class="btn-row"><button class="btn-ghost" onclick="closeModal()">Close</button></div>`);
+  } else {
+    const s=getClass().students.find(s=>s.id===mmStuId);if(!s)return;
+    const maxM=PAPER_MAX[mmPaper];const display=mmScore===null?'—':mmScore;
+    const hasHalf=mmScore!==null&&mmScore%1===0.5;
+    let markBtns='';
+    for(let i=0;i<=maxM;i++){const isSel=mmScore!==null&&Math.floor(mmScore)===i;markBtns+=`<button class="mark-btn${isSel?' sel':''}" onclick="tapMark(${i})">${i}</button>`;}
+    showModal(`<h3>${esc(s.name)}</h3>
+      <div class="paper-toggle-row">${toggles}</div>
+      <div style="font-size:11px;color:var(--pending);margin-bottom:2px;">${PAPER_LABEL[mmPaper]} · max ${maxM}</div>
+      <div class="score-display">${display}</div>
+      <div class="btn-row" style="margin-bottom:8px;">
+        <button class="half-btn${hasHalf?' on':''}" onclick="tapHalf()">+0.5</button>
+        <button class="btn-ghost" onclick="clearScore()">Clear</button>
+        <button class="btn-ghost" onclick="doneWithStudent()">← Back</button>
+      </div>
+      <div class="mark-grid">${markBtns}</div>`);
+  }
+}
+function switchPaper(paper){if(mmView==='picker')commitScore();mmPaper=paper;if(mmView==='picker'){const v=getMark(mmStuId,mmTestId,mmPaper);mmScore=v!==null?v:null;}renderMarkModal();}
+function openMarkPicker(stuId){mmStuId=stuId;mmView='picker';const v=getMark(stuId,mmTestId,mmPaper);mmScore=v!==null?v:null;renderMarkModal();}
+function tapMark(val){mmScore=val;renderMarkModal();}
+function tapHalf(){if(mmScore===null)mmScore=0.5;else if(mmScore%1===0.5)mmScore=Math.floor(mmScore);else mmScore+=0.5;renderMarkModal();}
+function clearScore(){mmScore=null;renderMarkModal();}
+function commitScore(){if(mmStuId&&mmTestId){setMarkData(mmStuId,mmTestId,mmPaper,mmScore);renderTable();}}
+function doneWithStudent(){commitScore();mmView='students';mmStuId=null;mmScore=null;renderMarkModal();}
+
+// EXPORT CSV
+function exportAnalyticsCSV() {
+  const c = getClass();
+  if (!c) return;
+  const stats = getClassStats();
+  if (!stats) { alert('No data to export.'); return; }
+  
+  let csv = 'Student,Average,High,Low,Trend,Grade\n';
+  Object.keys(stats.studentAverages).forEach(id => {
+    const s = stats.studentAverages[id];
+    const student = c.students.find(st => st.id === id);
+    if (!student) return;
+    const scores = c.tests.filter(t => !t.hidden).map(t => getTotal(id, t.id)).filter(v => v !== null);
+    const high = scores.length ? Math.max(...scores) : 0;
+    const low = scores.length ? Math.min(...scores) : 0;
+    const trend = scores.length > 1 ? scores[scores.length-1] - scores[0] : 0;
+    const grade = s.avg >= 80 ? 'A' : s.avg >= 65 ? 'B' : s.avg >= 50 ? 'C' : s.avg >= 40 ? 'D' : 'F';
+    csv += `"${student.name}",${s.avg.toFixed(1)},${high},${low},${trend.toFixed(1)},${grade}\n`;
+  });
+  
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${c.name}_analytics.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// WORD REPORT
+function drawChart(canvas,stuId,tests){
+  const barW=26,barGap=2,grpGap=18,grpW=3*(barW+barGap)+grpGap;
+  const padL=38,padT=28,padB=85,padR=16,chartH=280,CHART_MAX=100;
+  canvas.width=Math.max(padL+tests.length*grpW+padR,200);canvas.height=padT+chartH+padB;
+  const ctx=canvas.getContext('2d');ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,canvas.height);
+  [0,25,50,75,100].forEach(v=>{
+    const y=padT+chartH-(v/CHART_MAX)*chartH;
+    ctx.strokeStyle='#000000';ctx.lineWidth=0.5;ctx.beginPath();ctx.moveTo(padL,y);ctx.lineTo(canvas.width-padR,y);ctx.stroke();
+    ctx.fillStyle='#000000';ctx.font='9px Arial';ctx.textAlign='right';ctx.fillText(v,padL-3,y+3);
+  });
+  ctx.strokeStyle='#000000';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(padL,padT);ctx.lineTo(padL,padT+chartH);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(canvas.width-padR,padT);ctx.lineTo(canvas.width-padR,padT+chartH);ctx.stroke();
+  tests.forEach((t,ti)=>{
+    const p1=getP1(stuId,t.id),p2=getMark(stuId,t.id,'p2'),tot=getTotal(stuId,t.id);
+    const gX=padL+ti*grpW;
+    const drawBar=(x,val,color)=>{
+      if(val===null){ctx.fillStyle='#ddd';ctx.fillRect(x,padT+chartH-3,barW,3);return;}
+      const bH=Math.max(2,(Math.min(val,CHART_MAX)/CHART_MAX)*chartH);
+      ctx.fillStyle=color;ctx.fillRect(x,padT+chartH-bH,barW,bH);
+      ctx.strokeStyle='#000000';ctx.lineWidth=1;ctx.strokeRect(x,padT+chartH-bH,barW,bH);
+      ctx.fillStyle='#000000';ctx.font='bold 9px Arial';ctx.textAlign='center';ctx.fillText(val,x+barW/2,padT+chartH-bH-4);
+    };
+    drawBar(gX,p1,'#FFE082');drawBar(gX+barW+barGap,p2,'#A5D6A7');drawBar(gX+2*(barW+barGap),tot,'#90CAF9');
+    const cx=gX+grpW/2-grpGap/2;
+    ctx.fillStyle='#000000';ctx.font='bold 9px Arial';ctx.textAlign='center';
+    const nameLines=wrapCanvasText(ctx,t.name,grpW-grpGap+8);
+    nameLines.forEach((line,li)=>ctx.fillText(line,cx,padT+chartH+16+li*12));
+    if(t.date){ctx.fillStyle='#000000';ctx.font='8px Arial';ctx.fillText(t.date,cx,padT+chartH+16+nameLines.length*12+2);}
+  });
+  const items=[['Paper 1','#FFE082'],['Paper 2','#A5D6A7'],['Total','#90CAF9']];let lx=padL;
+  items.forEach(([lbl,col])=>{ctx.fillStyle=col;ctx.fillRect(lx,canvas.height-14,14,11);ctx.strokeStyle='#000000';ctx.lineWidth=1;ctx.strokeRect(lx,canvas.height-14,14,11);ctx.fillStyle='#000000';ctx.font='9px Arial';ctx.textAlign='left';ctx.fillText(lbl,lx+17,canvas.height-4);lx+=72;});
+}
+function wrapCanvasText(ctx,text,maxWidth){const words=text.split(' ');const lines=[];let cur='';words.forEach(w=>{const t=cur?cur+' '+w:w;if(ctx.measureText(t).width<=maxWidth)cur=t;else{if(cur)lines.push(cur);cur=w;}});if(cur)lines.push(cur);return lines.length?lines:[text];}
+function dp(text,opts){opts=opts||{};const rp=[];if(opts.bold)rp.push('<w:b/>');if(opts.size)rp.push(`<w:sz w:val="${opts.size}"/><w:szCs w:val="${opts.size}"/>`);const rPr=rp.length?`<w:rPr>${rp.join('')}</w:rPr>`:'';const pPr=(opts.bold||opts.size)?`<w:pPr><w:rPr>${rp.join('')}</w:rPr></w:pPr>`:'';return`<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${escX(text)}</w:t></w:r></w:p>`;}
+function pageBreak(){return`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`;}
+function dtable(headers,rows,colWidths){const cell=(txt,bold,colW)=>{const wXml=colW?`<w:tcW w:w="${colW}" w:type="dxa"/>`:'';return`<w:tc><w:tcPr>${wXml}<w:tcBorders><w:top w:val="single" w:sz="4" w:color="000000"/><w:left w:val="single" w:sz="4" w:color="000000"/><w:bottom w:val="single" w:sz="4" w:color="000000"/><w:right w:val="single" w:sz="4" w:color="000000"/></w:tcBorders></w:tcPr><w:p><w:pPr><w:spacing w:before="0" w:after="60"/></w:pPr><w:r><w:rPr>${bold?'<w:b/>':''}<w:sz w:val="20"/></w:rPr><w:t xml:space="preserve">${escX(String(txt))}</w:t></w:r></w:p></w:tc>`;};const cw=colWidths||[];const totalW=cw.reduce((a,b)=>a+b,0)||9000;const tblGrid=cw.length?`<w:tblGrid>${cw.map(w=>`<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>`:'';return`<w:tbl><w:tblPr><w:tblW w:w="${totalW}" w:type="dxa"/><w:tblLayout w:type="fixed"/></w:tblPr>${tblGrid}<w:tr>${headers.map((h,i)=>cell(h,true,cw[i])).join('')}</w:tr>${rows.map(r=>`<w:tr>${r.map((c,i)=>cell(c,false,cw[i])).join('')}</w:tr>`).join('')}</w:tbl>`;}
+function dimg(relId,wE,hE,idx){return`<w:p><w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${wE}" cy="${hE}"/><wp:docPr id="${idx}" name="Chart${idx}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="Chart${idx}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${wE}" cy="${hE}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;}
+const sigBlock=`<w:tbl><w:tblPr><w:tblW w:w="9638" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="none"/><w:right w:val="none"/><w:insideH w:val="none"/><w:insideV w:val="none"/></w:tblBorders></w:tblPr><w:tblGrid><w:gridCol w:w="1400"/><w:gridCol w:w="8238"/></w:tblGrid><w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="9638" w:type="dxa"/><w:gridSpan w:val="2"/><w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="none"/><w:right w:val="none"/></w:tcBorders></w:tcPr><w:p><w:r><w:rPr><w:b/><w:sz w:val="20"/></w:rPr><w:t>Parent / Guardian Acknowledgement</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="1400" w:type="dxa"/><w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="none"/></w:tcBorders></w:tcPr><w:p><w:pPr><w:spacing w:before="400" w:after="0"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/></w:rPr><w:t>Signature:</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:w="8238" w:type="dxa"/><w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="none"/></w:tcBorders></w:tcPr><w:p><w:pPr><w:spacing w:before="400" w:after="0"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/></w:rPr><w:t xml:space="preserve"> </w:t></w:r></w:p></w:tc></w:tr><w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="1400" w:type="dxa"/><w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="none"/></w:tcBorders></w:tcPr><w:p><w:pPr><w:spacing w:before="400" w:after="0"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/></w:rPr><w:t>Date:</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:w="8238" w:type="dxa"/><w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="none"/></w:tcBorders></w:tcPr><w:p><w:pPr><w:spacing w:before="400" w:after="0"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/></w:rPr><w:t xml:space="preserve"> </w:t></w:r></w:p></w:tc></w:tr></w:tbl>`;
+async function generateWordReport(stuIds){const c=getClass();if(!c||!c.tests.length){alert('No tests yet.');return;}const visible=c.tests.filter(t=>!t.hidden);const canvas=document.getElementById('offscreenChart');const paragraphs=[],imageRels=[],imageFiles=[];let relIdx=2;for(let si=0;si<stuIds.length;si++){const stuId=stuIds[si];const s=c.students.find(st=>st.id===stuId);if(!s)continue;if(si>0)paragraphs.push(pageBreak());paragraphs.push(dp('Test Score Report',{bold:true,size:32}));paragraphs.push(dp(`Student: ${s.name}`,{bold:true}));paragraphs.push(dp(`Class: ${c.name}`));paragraphs.push(dp(`Date: ${new Date().toLocaleDateString()}`));paragraphs.push(dp(''));const hdrs=['Test','Date','Paper 1A','Paper 1B','Paper 1','Paper 2','Total'];const rows=visible.map(t=>[t.name,t.date||'',fmt(getMark(stuId,t.id,'p1a')),fmt(getMark(stuId,t.id,'p1b')),fmt(getP1(stuId,t.id)),fmt(getMark(stuId,t.id,'p2')),fmt(getTotal(stuId,t.id))]);paragraphs.push(dtable(hdrs,rows,[2200,1200,850,850,850,850,800]));paragraphs.push(dp(''));paragraphs.push(dp('Performance chart',{bold:true}));drawChart(canvas,stuId,visible);const b64=canvas.toDataURL('image/png').split(',')[1];const fname=`chart_${si}.png`,relId=`rId${relIdx++}`;imageFiles.push({name:fname,data:b64});imageRels.push({id:relId,target:`media/${fname}`});const wE=Math.min(canvas.width*9525,6124800),hE=Math.round(wE*canvas.height/canvas.width);paragraphs.push(dimg(relId,wE,hE,si+1));paragraphs.push(dp(''));paragraphs.push(sigBlock);}const ctXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`;const relsXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`;const docRelsXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${imageRels.map(r=>`<Relationship Id="${r.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${r.target}"/>`).join('')}</Relationships>`;const docXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>${paragraphs.join('\n')}<w:sectPr><w:pgMar w:top="720" w:right="1440" w:bottom="720" w:left="1440"/></w:sectPr></w:body></w:document>`;const zip=new JSZip();zip.file('[Content_Types].xml',ctXml);zip.folder('_rels').file('.rels',relsXml);const wf=zip.folder('word');wf.file('document.xml',docXml);wf.folder('_rels').file('document.xml.rels',docRelsXml);const mf=wf.folder('media');imageFiles.forEach(f=>mf.file(f.name,f.data,{base64:true}));const blob=await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;const fname=stuIds.length===1?(c.students.find(s=>s.id===stuIds[0])?.name||'student').replace(/[^a-z0-9]/gi,'_'):c.name.replace(/[^a-z0-9]/gi,'_')+'_all';a.download=`${fname}_test_report.docx`;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);}
+
+// INIT
+document.getElementById('addClassBtn').onclick=()=>{const i=document.getElementById('newClassName');addClass(i.value);i.value='';};
+document.getElementById('newClassName').addEventListener('keydown',e=>{if(e.key==='Enter'){addClass(e.target.value);e.target.value='';}});
+renderAll();
+initSync();
+</script>
+</body>
+</html>
