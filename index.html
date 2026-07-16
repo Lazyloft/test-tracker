@@ -791,39 +791,54 @@ function renderTable(){
   const visible=c.tests.filter(t=>!t.hidden);
   if(!visible.length){wrap.innerHTML='<div class="empty-state">Add a test above to start recording marks.</div>';return;}
   if(!c.students.length){wrap.innerHTML='<div class="empty-state">Add students above.</div>';return;}
-  let h='<table><thead><tr><th style="text-align:left;min-width:110px;">Student</th>';
-  visible.forEach(t=>{
-    const lk=!!t.locked;
-    h+=`<th colspan="5" class="test-hd">${esc(t.name)}<br><span style="font-weight:400;font-size:10px;color:var(--pending);">${t.date||''}</span>
+  
+  // Build the table with proper alignment
+  let h = '<table><thead>';
+  // First row: student column + test headers spanning 5 columns each
+  h += '<tr><th style="text-align:left;min-width:110px;">Student</th>';
+  visible.forEach(t => {
+    const lk = !!t.locked;
+    h += `<th colspan="5" class="test-hd">${esc(t.name)}<br><span style="font-weight:400;font-size:10px;color:var(--pending);">${t.date||''}</span>
       <br><span style="display:inline-flex;gap:2px;margin-top:2px;">
         <button class="btn-ghost" style="font-size:10px;padding:2px 5px;" onclick="toggleTestLock('${t.id}')">${lk?'🔒':'🔓'}</button>
         <button class="btn-ghost" style="font-size:10px;padding:2px 5px;" onclick="hideTest('${t.id}')">👁 Hide</button>
         ${lk?'':`<button class="btn-ghost" style="font-size:10px;padding:2px 5px;" onclick="deleteTest('${t.id}')">✕</button>`}
       </span></th>`;
   });
-  h+='</tr><tr>';
-  visible.forEach(t=>{
-    h+=`<th class="clickable p1h" onclick="openMarkEntry('${t.id}','p1a')">1A</th>
-        <th class="clickable p1h" onclick="openMarkEntry('${t.id}','p1b')">1B</th>
-        <th class="p1h" style="color:var(--done);">P1</th>
-        <th class="clickable p2h" onclick="openMarkEntry('${t.id}','p2')">P2</th>
-        <th class="toth" style="color:var(--perfect);">Total</th>`;
+  h += '</tr>';
+  
+  // Second row: sub-headers for each test's 5 columns
+  h += '<tr>';
+  visible.forEach(t => {
+    h += `<th class="clickable p1h" onclick="openMarkEntry('${t.id}','p1a')">1A</th>
+          <th class="clickable p1h" onclick="openMarkEntry('${t.id}','p1b')">1B</th>
+          <th class="p1h" style="color:var(--done);">P1</th>
+          <th class="clickable p2h" onclick="openMarkEntry('${t.id}','p2')">P2</th>
+          <th class="toth" style="color:var(--perfect);">Total</th>`;
   });
-  h+='</tr></thead><tbody>';
-  c.students.forEach(s=>{
-    h+=`<tr><td>${esc(s.name)} <button class="del-btn" onclick="deleteStudent('${s.id}')">✕</button></td>`;
-    visible.forEach(t=>{
-      const a=getMark(s.id,t.id,'p1a'),b=getMark(s.id,t.id,'p1b'),p1=getP1(s.id,t.id),p2=getMark(s.id,t.id,'p2'),tot=getTotal(s.id,t.id);
+  h += '</tr></thead><tbody>';
+  
+  // Student rows
+  c.students.forEach(s => {
+    h += `<tr><td>${esc(s.name)} <button class="del-btn" onclick="deleteStudent('${s.id}')">✕</button></td>`;
+    visible.forEach(t => {
+      const a=getMark(s.id,t.id,'p1a');
+      const b=getMark(s.id,t.id,'p1b');
+      const p1=getP1(s.id,t.id);
+      const p2=getMark(s.id,t.id,'p2');
+      const tot=getTotal(s.id,t.id);
       const totClass=tot!==null&&tot<50?'red-total':tot!==null?'entered':'computed';
-      h+=`<td class="${a!==null?'entered':''}">${fmt(a)}</td>
-          <td class="${b!==null?'entered':''}">${fmt(b)}</td>
-          <td class="${p1!==null?'entered':'computed'}">${fmt(p1)}</td>
-          <td class="${p2!==null?'entered':''}">${fmt(p2)}</td>
-          <td class="${totClass}">${fmt(tot)}</td>`;
+      h += `<td class="${a!==null?'entered':''}">${fmt(a)}</td>
+            <td class="${b!==null?'entered':''}">${fmt(b)}</td>
+            <td class="${p1!==null?'entered':'computed'}">${fmt(p1)}</td>
+            <td class="${p2!==null?'entered':''}">${fmt(p2)}</td>
+            <td class="${totClass}">${fmt(tot)}</td>`;
     });
-    h+='</tr>';
+    h += '</tr>';
   });
-  h+='</tbody></table>';wrap.innerHTML=h;
+  
+  h += '</tbody></table>';
+  wrap.innerHTML = h;
 }
 
 // MARK ENTRY MODAL
@@ -900,7 +915,7 @@ function exportAnalyticsCSV() {
   URL.revokeObjectURL(url);
 }
 
-// WORD REPORT
+// WORD REPORT (unchanged)
 function drawChart(canvas,stuId,tests){
   const barW=26,barGap=2,grpGap=18,grpW=3*(barW+barGap)+grpGap;
   const padL=38,padT=28,padB=85,padR=16,chartH=280,CHART_MAX=100;
