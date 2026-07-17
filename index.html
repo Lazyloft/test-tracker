@@ -127,7 +127,7 @@ function escX(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&
 function showModal(html){document.getElementById('modalBody').innerHTML=html;document.getElementById('modalOverlay').classList.add('show');}
 function closeModal(){
   if (mmView === 'picker') {
-    commitScore(); // safety save
+    commitScore();
     mmView = 'students';
     mmStuId = null;
     mmScore = null;
@@ -164,7 +164,7 @@ async function connectSync(token,gistId,silent){
     if(!silent)closeModal();
   }catch(err){
     console.warn('Sync connection error:',err);
-    syncToken=''; syncGistId=''; // disable sync
+    syncToken=''; syncGistId='';
     updateSyncBtn(false);
     if(!silent) alert('Could not connect.\n\n'+err.message);
   }
@@ -176,7 +176,6 @@ async function pollOnce(){
       {headers:{'Authorization':'token '+syncToken,'Accept':'application/vnd.github+json'}});
     if(!res.ok){
       if(res.status===403){
-        // token invalid/expired – disable sync
         console.warn('Sync disabled: 403 Forbidden');
         syncToken=''; syncGistId=''; 
         if(pollHandle) clearInterval(pollHandle);
@@ -337,6 +336,7 @@ function setMarkData(stuId,testId,paper,value){
 }
 function getP1(stuId,testId){const a=getMark(stuId,testId,'p1a'),b=getMark(stuId,testId,'p1b');return(a===null||b===null)?null:a+b;}
 function getTotal(stuId,testId){const p1=getP1(stuId,testId),p2=getMark(stuId,testId,'p2');return(p1===null||p2===null)?null:p1+p2;}
+function getAL(total){if(total===null||total===undefined)return null;if(total>=90)return 'AL1';if(total>=85)return 'AL2';if(total>=80)return 'AL3';if(total>=75)return 'AL4';if(total>=65)return 'AL5';if(total>=45)return 'AL6';if(total>=20)return 'AL7';return 'AL8';}
 
 // =============== STATISTICS FUNCTIONS ===============
 function getClassStats() {
@@ -977,7 +977,7 @@ function exportAnalyticsCSV() {
   URL.revokeObjectURL(url);
 }
 
-// WORD REPORT (unchanged)
+// =============== WORD REPORT (with AL column) ===============
 function drawChart(canvas,stuId,tests){
   const barW=26,barGap=2,grpGap=18,grpW=3*(barW+barGap)+grpGap;
   const padL=38,padT=28,padB=85,padR=16,chartH=280,CHART_MAX=100;
@@ -1017,7 +1017,68 @@ function pageBreak(){return`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`;}
 function dtable(headers,rows,colWidths){const cell=(txt,bold,colW)=>{const wXml=colW?`<w:tcW w:w="${colW}" w:type="dxa"/>`:'';return`<w:tc><w:tcPr>${wXml}<w:tcBorders><w:top w:val="single" w:sz="4" w:color="000000"/><w:left w:val="single" w:sz="4" w:color="000000"/><w:bottom w:val="single" w:sz="4" w:color="000000"/><w:right w:val="single" w:sz="4" w:color="000000"/></w:tcBorders></w:tcPr><w:p><w:pPr><w:spacing w:before="0" w:after="60"/></w:pPr><w:r><w:rPr>${bold?'<w:b/>':''}<w:sz w:val="20"/></w:rPr><w:t xml:space="preserve">${escX(String(txt))}</w:t></w:r></w:p></w:tc>`;};const cw=colWidths||[];const totalW=cw.reduce((a,b)=>a+b,0)||9000;const tblGrid=cw.length?`<w:tblGrid>${cw.map(w=>`<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>`:'';return`<w:tbl><w:tblPr><w:tblW w:w="${totalW}" w:type="dxa"/><w:tblLayout w:type="fixed"/></w:tblPr>${tblGrid}<w:tr>${headers.map((h,i)=>cell(h,true,cw[i])).join('')}</w:tr>${rows.map(r=>`<w:tr>${r.map((c,i)=>cell(c,false,cw[i])).join('')}</w:tr>`).join('')}</w:tbl>`;}
 function dimg(relId,wE,hE,idx){return`<w:p><w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${wE}" cy="${hE}"/><wp:docPr id="${idx}" name="Chart${idx}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="Chart${idx}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${wE}" cy="${hE}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;}
 const sigBlock=`<w:tbl><w:tblPr><w:tblW w:w="9638" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="none"/><w:right w:val="none"/><w:insideH w:val="none"/><w:insideV w:val="none"/></w:tblBorders></w:tblPr><w:tblGrid><w:gridCol w:w="1400"/><w:gridCol w:w="8238"/></w:tblGrid><w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="9638" w:type="dxa"/><w:gridSpan w:val="2"/><w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="none"/><w:right w:val="none"/></w:tcBorders></w:tcPr><w:p><w:r><w:rPr><w:b/><w:sz w:val="20"/></w:rPr><w:t>Parent / Guardian Acknowledgement</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="1400" w:type="dxa"/><w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="none"/></w:tcBorders></w:tcPr><w:p><w:pPr><w:spacing w:before="400" w:after="0"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/></w:rPr><w:t>Signature:</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:w="8238" w:type="dxa"/><w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="none"/></w:tcBorders></w:tcPr><w:p><w:pPr><w:spacing w:before="400" w:after="0"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/></w:rPr><w:t xml:space="preserve"> </w:t></w:r></w:p></w:tc></w:tr><w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="1400" w:type="dxa"/><w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="none"/></w:tcBorders></w:tcPr><w:p><w:pPr><w:spacing w:before="400" w:after="0"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/></w:rPr><w:t>Date:</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:w="8238" w:type="dxa"/><w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="none"/></w:tcBorders></w:tcPr><w:p><w:pPr><w:spacing w:before="400" w:after="0"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/></w:rPr><w:t xml:space="preserve"> </w:t></w:r></w:p></w:tc></w:tr></w:tbl>`;
-async function generateWordReport(stuIds){const c=getClass();if(!c||!c.tests.length){alert('No tests yet.');return;}const visible=c.tests.filter(t=>!t.hidden);const canvas=document.getElementById('offscreenChart');const paragraphs=[],imageRels=[],imageFiles=[];let relIdx=2;for(let si=0;si<stuIds.length;si++){const stuId=stuIds[si];const s=c.students.find(st=>st.id===stuId);if(!s)continue;if(si>0)paragraphs.push(pageBreak());paragraphs.push(dp('Test Score Report',{bold:true,size:32}));paragraphs.push(dp(`Student: ${s.name}`,{bold:true}));paragraphs.push(dp(`Class: ${c.name}`));paragraphs.push(dp(`Date: ${new Date().toLocaleDateString()}`));paragraphs.push(dp(''));const hdrs=['Test','Date','Paper 1A','Paper 1B','Paper 1','Paper 2','Total'];const rows=visible.map(t=>[t.name,t.date||'',fmt(getMark(stuId,t.id,'p1a')),fmt(getMark(stuId,t.id,'p1b')),fmt(getP1(stuId,t.id)),fmt(getMark(stuId,t.id,'p2')),fmt(getTotal(stuId,t.id))]);paragraphs.push(dtable(hdrs,rows,[2200,1200,850,850,850,850,800]));paragraphs.push(dp(''));paragraphs.push(dp('Performance chart',{bold:true}));drawChart(canvas,stuId,visible);const b64=canvas.toDataURL('image/png').split(',')[1];const fname=`chart_${si}.png`,relId=`rId${relIdx++}`;imageFiles.push({name:fname,data:b64});imageRels.push({id:relId,target:`media/${fname}`});const wE=Math.min(canvas.width*9525,6124800),hE=Math.round(wE*canvas.height/canvas.width);paragraphs.push(dimg(relId,wE,hE,si+1));paragraphs.push(dp(''));paragraphs.push(sigBlock);}const ctXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`;const relsXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`;const docRelsXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${imageRels.map(r=>`<Relationship Id="${r.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${r.target}"/>`).join('')}</Relationships>`;const docXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>${paragraphs.join('\n')}<w:sectPr><w:pgMar w:top="720" w:right="1440" w:bottom="720" w:left="1440"/></w:sectPr></w:body></w:document>`;const zip=new JSZip();zip.file('[Content_Types].xml',ctXml);zip.folder('_rels').file('.rels',relsXml);const wf=zip.folder('word');wf.file('document.xml',docXml);wf.folder('_rels').file('document.xml.rels',docRelsXml);const mf=wf.folder('media');imageFiles.forEach(f=>mf.file(f.name,f.data,{base64:true}));const blob=await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;const fname=stuIds.length===1?(c.students.find(s=>s.id===stuIds[0])?.name||'student').replace(/[^a-z0-9]/gi,'_'):c.name.replace(/[^a-z0-9]/gi,'_')+'_all';a.download=`${fname}_test_report.docx`;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);}
+async function generateWordReport(stuIds){
+  const c=getClass();
+  if(!c||!c.tests.length){alert('No tests yet.');return;}
+  const visible=c.tests.filter(t=>!t.hidden);
+  const canvas=document.getElementById('offscreenChart');
+  const paragraphs=[],imageRels=[],imageFiles=[];
+  let relIdx=2;
+  for(let si=0; si<stuIds.length; si++){
+    const stuId=stuIds[si];
+    const s=c.students.find(st=>st.id===stuId);
+    if(!s) continue;
+    if(si>0) paragraphs.push(pageBreak());
+    paragraphs.push(dp('Test Score Report',{bold:true,size:32}));
+    paragraphs.push(dp(`Student: ${s.name}`,{bold:true}));
+    paragraphs.push(dp(`Class: ${c.name}`));
+    paragraphs.push(dp(`Date: ${new Date().toLocaleDateString()}`));
+    paragraphs.push(dp(''));
+    // Headers now include AL
+    const hdrs=['Test','Date','Paper 1A','Paper 1B','Paper 1','Paper 2','Total','AL'];
+    // Build rows with AL
+    const rows=visible.map(t=>{
+      const total=getTotal(stuId,t.id);
+      const al = (total!==null) ? getAL(total) : '—';
+      return [
+        t.name,
+        t.date||'',
+        fmt(getMark(stuId,t.id,'p1a')),
+        fmt(getMark(stuId,t.id,'p1b')),
+        fmt(getP1(stuId,t.id)),
+        fmt(getMark(stuId,t.id,'p2')),
+        fmt(total),
+        al
+      ];
+    });
+    // Adjust column widths: added AL column with width 600
+    paragraphs.push(dtable(hdrs, rows, [2200,1200,850,850,850,850,800,600]));
+    paragraphs.push(dp(''));
+    paragraphs.push(dp('Performance chart',{bold:true}));
+    drawChart(canvas,stuId,visible);
+    const b64=canvas.toDataURL('image/png').split(',')[1];
+    const fname=`chart_${si}.png`, relId=`rId${relIdx++}`;
+    imageFiles.push({name:fname,data:b64});
+    imageRels.push({id:relId,target:`media/${fname}`});
+    const wE=Math.min(canvas.width*9525,6124800), hE=Math.round(wE*canvas.height/canvas.width);
+    paragraphs.push(dimg(relId,wE,hE,si+1));
+    paragraphs.push(dp(''));
+    paragraphs.push(sigBlock);
+  }
+  const ctXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`;
+  const relsXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`;
+  const docRelsXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${imageRels.map(r=>`<Relationship Id="${r.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${r.target}"/>`).join('')}</Relationships>`;
+  const docXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>${paragraphs.join('\n')}<w:sectPr><w:pgMar w:top="720" w:right="1440" w:bottom="720" w:left="1440"/></w:sectPr></w:body></w:document>`;
+  const zip=new JSZip();zip.file('[Content_Types].xml',ctXml);zip.folder('_rels').file('.rels',relsXml);
+  const wf=zip.folder('word');wf.file('document.xml',docXml);wf.folder('_rels').file('document.xml.rels',docRelsXml);
+  const mf=wf.folder('media');imageFiles.forEach(f=>mf.file(f.name,f.data,{base64:true}));
+  const blob=await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;
+  const fname=stuIds.length===1?(c.students.find(s=>s.id===stuIds[0])?.name||'student').replace(/[^a-z0-9]/gi,'_'):c.name.replace(/[^a-z0-9]/gi,'_')+'_all';
+  a.download=`${fname}_test_report.docx`;
+  document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
+}
 
 // INIT
 document.getElementById('addClassBtn').onclick=()=>{const i=document.getElementById('newClassName');addClass(i.value);i.value='';};
