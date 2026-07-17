@@ -126,9 +126,8 @@ function esc(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&l
 function escX(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[m]));}
 function showModal(html){document.getElementById('modalBody').innerHTML=html;document.getElementById('modalOverlay').classList.add('show');}
 function closeModal(){
-  // If we are in the picker view, save any pending score before closing
   if (mmView === 'picker') {
-    commitScore();
+    commitScore(); // safety save
     mmView = 'students';
     mmStuId = null;
     mmScore = null;
@@ -849,7 +848,7 @@ function renderTable(){
   wrap.innerHTML = h;
 }
 
-// MARK ENTRY MODAL
+// MARK ENTRY MODAL - AUTO-SAVE ON TAP
 function openMarkEntry(testId,paper){mmTestId=testId;mmPaper=paper;mmStuId=null;mmScore=null;mmView='students';renderMarkModal();}
 function renderMarkModal(){
   const c=getClass();const t=c&&c.tests.find(t=>t.id===mmTestId);if(!t)return;
@@ -895,11 +894,45 @@ function switchPaper(paper){
   renderMarkModal();
 }
 function openMarkPicker(stuId){mmStuId=stuId;mmView='picker';const v=getMark(stuId,mmTestId,mmPaper);mmScore=v!==null?v:null;renderMarkModal();}
-function tapMark(val){mmScore=val;renderMarkModal();}
-function tapHalf(){if(mmScore===null)mmScore=0.5;else if(mmScore%1===0.5)mmScore=Math.floor(mmScore);else mmScore+=0.5;renderMarkModal();}
-function clearScore(){mmScore=null;renderMarkModal();}
-function commitScore(){if(mmStuId&&mmTestId){setMarkData(mmStuId,mmTestId,mmPaper,mmScore);renderTable();}}
-function doneWithStudent(){commitScore();mmView='students';mmStuId=null;mmScore=null;renderMarkModal();}
+function tapMark(val){
+  mmScore = val;
+  if (mmStuId && mmTestId && mmPaper) {
+    setMarkData(mmStuId, mmTestId, mmPaper, mmScore);
+    renderTable(); // update the scoresheet behind the modal
+  }
+  renderMarkModal(); // update display
+}
+function tapHalf(){
+  if(mmScore===null) mmScore = 0.5;
+  else if(mmScore%1===0.5) mmScore = Math.floor(mmScore);
+  else mmScore += 0.5;
+  if (mmStuId && mmTestId && mmPaper) {
+    setMarkData(mmStuId, mmTestId, mmPaper, mmScore);
+    renderTable();
+  }
+  renderMarkModal();
+}
+function clearScore(){
+  mmScore = null;
+  if (mmStuId && mmTestId && mmPaper) {
+    setMarkData(mmStuId, mmTestId, mmPaper, null);
+    renderTable();
+  }
+  renderMarkModal();
+}
+function commitScore(){
+  if(mmStuId && mmTestId){
+    setMarkData(mmStuId, mmTestId, mmPaper, mmScore);
+    renderTable();
+  }
+}
+function doneWithStudent(){
+  commitScore();
+  mmView='students';
+  mmStuId=null;
+  mmScore=null;
+  renderMarkModal();
+}
 
 // EXPORT CSV
 function exportAnalyticsCSV() {
