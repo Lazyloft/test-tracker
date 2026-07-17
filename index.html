@@ -50,6 +50,7 @@ td:first-child{text-align:left;min-width:80px;width:80px;}
 .paper-toggle-row{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;}
 .stu-grid{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;}
 .stu-btn{padding:9px 14px;border-radius:10px;background:var(--pending-bg);color:var(--ink);font-size:13px;font-weight:600;border:none;cursor:pointer;}
+.stu-btn.sel{background:#a8d5ba !important;color:var(--ink);}
 .score-display{font-size:36px;font-weight:800;text-align:center;padding:12px;background:var(--paper);border-radius:10px;margin:10px 0;color:var(--ink);}
 .mark-grid{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0;}
 .mark-btn{width:44px;height:44px;border-radius:8px;background:var(--pending-bg);color:var(--ink);font-size:13px;font-weight:700;padding:0;border:none;cursor:pointer;flex-shrink:0;}
@@ -80,6 +81,11 @@ footer{margin-top:auto;text-align:center;font-size:11px;color:var(--pending);pad
 .rank-3{background:#fef3e0;}
 .chart-container{background:white;border-radius:8px;padding:8px;margin:8px 0;border:1px solid var(--line);}
 .chart-container canvas{width:100% !important;height:auto !important;}
+.report-test-check{display:flex;align-items:center;gap:10px;padding:6px 8px;border-bottom:1px solid var(--line);cursor:pointer;}
+.report-test-check:hover{background:var(--pending-bg);}
+.report-test-check input[type=checkbox]{width:18px;height:18px;cursor:pointer;}
+.report-test-check label{flex:1;cursor:pointer;font-size:13px;}
+.student-selection-count{font-size:13px;color:var(--pending);margin:6px 0;}
 </style>
 </head>
 <body>
@@ -114,6 +120,12 @@ let analyticsTab='overview';
 const PAPER_LABEL={'p1a':'Paper 1A','p1b':'Paper 1B','p2':'Paper 2'};
 const PAPER_MAX={'p1a':26,'p1b':25,'p2':55};
 
+// Report selection state
+let reportSelectedStudents = new Set();
+let reportSelectedTests = new Set();
+let reportStudentModalOpen = false;
+let reportTestModalOpen = false;
+
 function loadState(){
   try{
     const r=localStorage.getItem(STORAGE_KEY);
@@ -129,7 +141,6 @@ function saveState(){
   state._updatedAt = Date.now();
   localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
   if(syncToken&&syncGistId){clearTimeout(saveTimer);saveTimer=setTimeout(pushToCloud,800);}
-  console.log('Data saved at', new Date().toLocaleTimeString());
 }
 function uid(p){return(p||'x')+'_'+Math.random().toString(36).slice(2,9);}
 function esc(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
@@ -142,6 +153,9 @@ function closeModal(){
     mmStuId = null;
     mmScore = null;
   }
+  // Reset report selection state if modal closed
+  reportStudentModalOpen = false;
+  reportTestModalOpen = false;
   document.getElementById('modalOverlay').classList.remove('show');
 }
 function fmt(v){return(v===null||v===undefined)?'—':v;}
@@ -215,7 +229,7 @@ async function connectSync(token,gistId,silent){
     syncGistId=gistId;saveSyncCfg({token:syncToken,gistId:syncGistId});
     updateSyncBtn(true);
     if(pollHandle)clearInterval(pollHandle);
-    await pollOnce(); // initial pull
+    await pollOnce();
     pollHandle=setInterval(pollOnce,5000);
     if(!silent)closeModal();
   }catch(err){
@@ -248,7 +262,6 @@ async function pollOnce(){
     const remoteState=JSON.parse(remoteJson);
     const localTime = state._updatedAt || 0;
     const remoteTime = remoteState._updatedAt || 0;
-    // If remote is newer, apply it; else push local to cloud
     if(remoteTime > localTime){
       console.log('Remote is newer, pulling...');
       lastRemoteJson=remoteJson;applyingRemote=true;
@@ -257,7 +270,6 @@ async function pollOnce(){
       localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
       renderAll();applyingRemote=false;
     } else if(Object.keys(state.classes).length>0){
-      // local is newer or same, push to cloud
       console.log('Local is newer, pushing...');
       lastRemoteJson=remoteJson;
       pushToCloud();
@@ -641,10 +653,13 @@ function renderContent(){
     </div>
     <div class="panel"><h2>Score sheet</h2><div class="table-scroll" id="tableWrap"></div></div>
     <div class="panel"><h2>Reports</h2>
-      <div class="row-f"><select id="reportStuSel"></select><button class="btn-ghost" id="genOneBtn">Word report (1 student)</button></div>
-      <div class="row-f"><button class="btn-main" id="genAllBtn">Word report (all students)</button></div>
+      <div class="row-f">
+        <button class="btn-main" onclick="showAllStudentsReportModal()">📄 All Students</button>
+        <button class="btn-main" onclick="showSelectedStudentsModal()">📄 Selected Students</button>
+      </div>
       <div class="row-f" style="margin-top:8px;">
         <button class="btn-ghost" onclick="showStudentAnalytics(document.getElementById('reportStuSel').value)">📊 Student Analytics</button>
+        <select id="reportStuSel" style="flex:1;"></select>
       </div>
     </div>`;
   document.getElementById('newTestDate').value=new Date().toISOString().slice(0,10);
@@ -652,8 +667,6 @@ function renderContent(){
   document.getElementById('newStuName').addEventListener('keydown',e=>{if(e.key==='Enter'){addStudent(e.target.value);e.target.value='';}});
   document.getElementById('addTestBtn').onclick=()=>{const n=document.getElementById('newTestName'),d=document.getElementById('newTestDate');addTest(n.value,d.value);n.value='';};
   document.getElementById('unhideBtn').onclick=showUnhidePanel;
-  document.getElementById('genOneBtn').onclick=()=>{const s=document.getElementById('reportStuSel');if(!s.value){alert('Select a student.');return;}generateWordReport([s.value]);};
-  document.getElementById('genAllBtn').onclick=()=>{const c=getClass();if(!c||!c.students.length){alert('No students.');return;}generateWordReport(c.students.map(s=>s.id));};
   renderTable();renderReportSel();
 }
 function renderReportSel(){
@@ -766,6 +779,144 @@ function exportAnalyticsCSV() {
   document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
+// =============== REPORT FUNCTIONS ===============
+function getVisibleTests(){
+  const c = getClass();
+  if(!c) return [];
+  return c.tests.filter(t => !t.hidden);
+}
+
+// Show test selection for All Students
+function showAllStudentsReportModal(){
+  const tests = getVisibleTests();
+  if(!tests.length){ alert('No visible tests to report.'); return; }
+  const allSelected = tests.length > 0;
+  let html = `<h3>📄 Report for All Students</h3>
+    <p>Select the tests to include in the report.</p>
+    <div style="margin:8px 0;">
+      <label style="font-weight:600;cursor:pointer;"><input type="checkbox" id="selectAllTestsAll" ${allSelected?'checked':''} onchange="toggleAllTestsAll()"> Select All</label>
+    </div>
+    <div style="max-height:250px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:4px;">`;
+  tests.forEach(t => {
+    html += `<div class="report-test-check">
+      <input type="checkbox" id="test_${t.id}" value="${t.id}" checked>
+      <label for="test_${t.id}">${esc(t.name)} ${t.date ? ' ('+esc(t.date)+')' : ''}</label>
+    </div>`;
+  });
+  html += `</div>
+    <div class="btn-row" style="margin-top:12px;">
+      <button class="btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn-main" onclick="generateAllStudentsReport()">📄 Generate</button>
+    </div>`;
+  showModal(html);
+}
+function toggleAllTestsAll(){
+  const checked = document.getElementById('selectAllTestsAll').checked;
+  document.querySelectorAll('#modalBody input[type=checkbox][id^="test_"]').forEach(cb => cb.checked = checked);
+}
+function generateAllStudentsReport(){
+  const c = getClass();
+  if(!c){ alert('No class loaded.'); return; }
+  const checked = document.querySelectorAll('#modalBody input[type=checkbox][id^="test_"]:checked');
+  const testIds = Array.from(checked).map(cb => cb.value);
+  if(!testIds.length){ alert('Please select at least one test.'); return; }
+  closeModal();
+  const studentIds = c.students.map(s => s.id);
+  if(!studentIds.length){ alert('No students in this class.'); return; }
+  generateWordReport(studentIds, testIds);
+}
+
+// Show selected students modal
+function showSelectedStudentsModal(){
+  const c = getClass();
+  if(!c){ alert('No class loaded.'); return; }
+  if(!c.students.length){ alert('No students in this class.'); return; }
+  const tests = getVisibleTests();
+  if(!tests.length){ alert('No visible tests to report.'); return; }
+  
+  // Initialize selection state
+  reportSelectedStudents = new Set();
+  // By default select all tests
+  reportSelectedTests = new Set(tests.map(t => t.id));
+  reportStudentModalOpen = true;
+  renderSelectedStudentsModal();
+}
+
+function renderSelectedStudentsModal(){
+  const c = getClass();
+  if(!c) return;
+  const tests = getVisibleTests();
+  const testNames = tests.filter(t => reportSelectedTests.has(t.id)).map(t => t.name).join(', ') || 'None selected';
+  
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+    <h3 style="margin:0;">📄 Select Students</h3>
+    <button class="btn-ghost" style="font-size:12px;padding:5px 12px;" onclick="showTestSelectionModalForStudents()">📋 Select Test</button>
+  </div>
+  <p style="font-size:12px;color:var(--pending);">Selected tests: ${esc(testNames)}</p>
+  <div class="student-selection-count">${reportSelectedStudents.size} student(s) selected</div>
+  <div class="stu-grid" style="max-height:280px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:8px;">`;
+  
+  c.students.forEach(s => {
+    const sel = reportSelectedStudents.has(s.id) ? 'sel' : '';
+    html += `<button class="stu-btn ${sel}" onclick="toggleStudentSelection('${s.id}')">${esc(s.name)}</button>`;
+  });
+  html += `</div>
+    <div class="btn-row" style="margin-top:12px;">
+      <button class="btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn-main" onclick="generateSelectedStudentsReport()">📄 Generate</button>
+    </div>`;
+  showModal(html);
+}
+
+function toggleStudentSelection(stuId){
+  if(reportSelectedStudents.has(stuId)) reportSelectedStudents.delete(stuId);
+  else reportSelectedStudents.add(stuId);
+  renderSelectedStudentsModal();
+}
+
+function showTestSelectionModalForStudents(){
+  const tests = getVisibleTests();
+  if(!tests.length){ alert('No visible tests.'); return; }
+  let html = `<h3>📋 Select Tests</h3>
+    <p>Choose which tests to include in the report.</p>
+    <div style="margin:8px 0;">
+      <label style="font-weight:600;cursor:pointer;"><input type="checkbox" id="selectAllTestsSel" ${tests.every(t=>reportSelectedTests.has(t.id))?'checked':''} onchange="toggleAllTestsSel()"> Select All</label>
+    </div>
+    <div style="max-height:250px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:4px;">`;
+  tests.forEach(t => {
+    const checked = reportSelectedTests.has(t.id) ? 'checked' : '';
+    html += `<div class="report-test-check">
+      <input type="checkbox" id="seltest_${t.id}" value="${t.id}" ${checked}>
+      <label for="seltest_${t.id}">${esc(t.name)} ${t.date ? ' ('+esc(t.date)+')' : ''}</label>
+    </div>`;
+  });
+  html += `</div>
+    <div class="btn-row" style="margin-top:12px;">
+      <button class="btn-ghost" onclick="closeModal();renderSelectedStudentsModal();">Cancel</button>
+      <button class="btn-main" onclick="applyTestSelectionForStudents()">Apply</button>
+    </div>`;
+  showModal(html);
+}
+function toggleAllTestsSel(){
+  const checked = document.getElementById('selectAllTestsSel').checked;
+  document.querySelectorAll('#modalBody input[type=checkbox][id^="seltest_"]').forEach(cb => cb.checked = checked);
+}
+function applyTestSelectionForStudents(){
+  const checked = document.querySelectorAll('#modalBody input[type=checkbox][id^="seltest_"]:checked');
+  reportSelectedTests = new Set(Array.from(checked).map(cb => cb.value));
+  closeModal();
+  // Reopen student modal
+  renderSelectedStudentsModal();
+}
+function generateSelectedStudentsReport(){
+  if(reportSelectedStudents.size === 0){ alert('Please select at least one student.'); return; }
+  if(reportSelectedTests.size === 0){ alert('Please select at least one test.'); return; }
+  const studentIds = Array.from(reportSelectedStudents);
+  const testIds = Array.from(reportSelectedTests);
+  closeModal();
+  generateWordReport(studentIds, testIds);
+}
+
 // =============== WORD REPORT ===============
 function drawChart(canvas,stuId,tests){
   const barW=26,barGap=2,grpGap=18,grpW=3*(barW+barGap)+grpGap;
@@ -806,12 +957,23 @@ function pageBreak(){return`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`;}
 function dtable(headers,rows,colWidths){const cell=(txt,bold,colW)=>{const wXml=colW?`<w:tcW w:w="${colW}" w:type="dxa"/>`:'';return`<w:tc><w:tcPr>${wXml}<w:tcBorders><w:top w:val="single" w:sz="4" w:color="000000"/><w:left w:val="single" w:sz="4" w:color="000000"/><w:bottom w:val="single" w:sz="4" w:color="000000"/><w:right w:val="single" w:sz="4" w:color="000000"/></w:tcBorders></w:tcPr><w:p><w:pPr><w:spacing w:before="0" w:after="60"/></w:pPr><w:r><w:rPr>${bold?'<w:b/>':''}<w:sz w:val="20"/></w:rPr><w:t xml:space="preserve">${escX(String(txt))}</w:t></w:r></w:p></w:tc>`;};const cw=colWidths||[];const totalW=cw.reduce((a,b)=>a+b,0)||9000;const tblGrid=cw.length?`<w:tblGrid>${cw.map(w=>`<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>`:'';return`<w:tbl><w:tblPr><w:tblW w:w="${totalW}" w:type="dxa"/><w:tblLayout w:type="fixed"/></w:tblPr>${tblGrid}<w:tr>${headers.map((h,i)=>cell(h,true,cw[i])).join('')}</w:tr>${rows.map(r=>`<w:tr>${r.map((c,i)=>cell(c,false,cw[i])).join('')}</w:tr>`).join('')}</w:tbl>`;}
 function dimg(relId,wE,hE,idx){return`<w:p><w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${wE}" cy="${hE}"/><wp:docPr id="${idx}" name="Chart${idx}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="Chart${idx}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${wE}" cy="${hE}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;}
 const sigBlock=`<w:tbl><w:tblPr><w:tblW w:w="9638" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="none"/><w:right w:val="none"/><w:insideH w:val="none"/><w:insideV w:val="none"/></w:tblBorders></w:tblPr><w:tblGrid><w:gridCol w:w="1400"/><w:gridCol w:w="8238"/></w:tblGrid><w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="9638" w:type="dxa"/><w:gridSpan w:val="2"/><w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="none"/><w:right w:val="none"/></w:tcBorders></w:tcPr><w:p><w:r><w:rPr><w:b/><w:sz w:val="20"/></w:rPr><w:t>Parent / Guardian Acknowledgement</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="1400" w:type="dxa"/><w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="none"/></w:tcBorders></w:tcPr><w:p><w:pPr><w:spacing w:before="400" w:after="0"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/></w:rPr><w:t>Signature:</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:w="8238" w:type="dxa"/><w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="none"/></w:tcBorders></w:tcPr><w:p><w:pPr><w:spacing w:before="400" w:after="0"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/></w:rPr><w:t xml:space="preserve"> </w:t></w:r></w:p></w:tc></w:tr><w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="1400" w:type="dxa"/><w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="none"/></w:tcBorders></w:tcPr><w:p><w:pPr><w:spacing w:before="400" w:after="0"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/></w:rPr><w:t>Date:</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:w="8238" w:type="dxa"/><w:tcBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="single" w:sz="8" w:color="000000"/><w:right w:val="none"/></w:tcBorders></w:tcPr><w:p><w:pPr><w:spacing w:before="400" w:after="0"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/></w:rPr><w:t xml:space="preserve"> </w:t></w:r></w:p></w:tc></w:tr></w:tbl>`;
-async function generateWordReport(stuIds){
+
+async function generateWordReport(stuIds, testIds){
   const c=getClass();
   if(!c||!c.tests.length){alert('No tests yet.');return;}
-  const visible=c.tests.filter(t=>!t.hidden);
+  
+  // If testIds not provided, use all visible tests
+  let tests;
+  if(testIds && testIds.length){
+    tests = c.tests.filter(t => testIds.includes(t.id) && !t.hidden);
+  } else {
+    tests = c.tests.filter(t => !t.hidden);
+  }
+  
+  if(!tests.length){ alert('No selected tests with data.'); return; }
+  
   const canvas=document.getElementById('offscreenChart');
-  const paragraphs=[],imageRels=[],imageFiles=[];
+  const paragraphs=[], imageRels=[], imageFiles=[];
   let relIdx=2;
   for(let si=0; si<stuIds.length; si++){
     const stuId=stuIds[si];
@@ -824,7 +986,7 @@ async function generateWordReport(stuIds){
     paragraphs.push(dp(`Date: ${new Date().toLocaleDateString()}`));
     paragraphs.push(dp(''));
     const hdrs=['Test','Date','Paper 1A','Paper 1B','Paper 1','Paper 2','Total','AL'];
-    const rows=visible.map(t=>{
+    const rows=tests.map(t=>{
       const total=getTotal(stuId,t.id);
       const al = (total!==null) ? getAL(total) : '—';
       return [
@@ -841,7 +1003,7 @@ async function generateWordReport(stuIds){
     paragraphs.push(dtable(hdrs, rows, [2200,1200,850,850,850,850,800,600]));
     paragraphs.push(dp(''));
     paragraphs.push(dp('Performance chart',{bold:true}));
-    drawChart(canvas,stuId,visible);
+    drawChart(canvas,stuId,tests);
     const b64=canvas.toDataURL('image/png').split(',')[1];
     const fname=`chart_${si}.png`, relId=`rId${relIdx++}`;
     imageFiles.push({name:fname,data:b64});
