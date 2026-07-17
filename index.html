@@ -90,6 +90,8 @@ footer{margin-top:auto;text-align:center;font-size:11px;color:var(--pending);pad
     <div class="btn-row">
       <button class="btn-ghost" id="syncStatusBtn" onclick="showSyncPanel()">☁️ Sync: Off</button>
       <button class="btn-ghost" id="deleteClassBtn" style="display:none" onclick="deleteActiveClass()">🗑 Delete class</button>
+      <button class="btn-ghost" onclick="exportData()">💾 Export</button>
+      <button class="btn-ghost" onclick="importData()">📂 Import</button>
     </div>
     <div class="class-row" id="classRow"></div>
     <div class="add-class">
@@ -113,13 +115,21 @@ const PAPER_LABEL={'p1a':'Paper 1A','p1b':'Paper 1B','p2':'Paper 2'};
 const PAPER_MAX={'p1a':26,'p1b':25,'p2':55};
 
 function loadState(){
-  try{const r=localStorage.getItem(STORAGE_KEY);if(r){const p=JSON.parse(r);if(p&&p.classOrder)return p;}}catch(e){}
-  return{classOrder:[],classes:{}};
+  try{
+    const r=localStorage.getItem(STORAGE_KEY);
+    if(r){
+      const p=JSON.parse(r);
+      if(p && p.classOrder) return p;
+    }
+  }catch(e){}
+  return {classOrder:[], classes:{}, _updatedAt: Date.now()};
 }
 let saveTimer=null;
 function saveState(){
+  state._updatedAt = Date.now();
   localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
   if(syncToken&&syncGistId){clearTimeout(saveTimer);saveTimer=setTimeout(pushToCloud,800);}
+  console.log('Data saved at', new Date().toLocaleTimeString());
 }
 function uid(p){return(p||'x')+'_'+Math.random().toString(36).slice(2,9);}
 function esc(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
@@ -136,11 +146,56 @@ function closeModal(){
 }
 function fmt(v){return(v===null||v===undefined)?'—':v;}
 
-// SYNC with better error handling
+// ============ BACKUP / RESTORE ============
+function exportData(){
+  const blob = new Blob([JSON.stringify(state,null,2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `test_tracker_backup_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+function importData(){
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/json';
+  input.onchange = (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev)=>{
+      try{
+        const data = JSON.parse(ev.target.result);
+        if(data.classOrder && data.classes){
+          if(confirm('This will replace ALL current data. Continue?')){
+            state = data;
+            state._updatedAt = Date.now();
+            localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
+            if(!state.classOrder.includes(activeClassId)) activeClassId = state.classOrder[0]||null;
+            renderAll();
+            alert('Data imported successfully.');
+          }
+        } else {
+          alert('Invalid file format.');
+        }
+      }catch(err){ alert('Error reading file: '+err.message); }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+}
+
+// ============ SYNC ============
 let syncToken='',syncGistId='',pollHandle=null,applyingRemote=false,lastRemoteJson=null;
 function loadSyncCfg(){try{const r=localStorage.getItem(SYNC_CFG_KEY);if(r)return JSON.parse(r);}catch(e){}return null;}
 function saveSyncCfg(c){localStorage.setItem(SYNC_CFG_KEY,JSON.stringify(c));}
-function initSync(){const c=loadSyncCfg();if(c&&c.token&&c.gistId)connectSync(c.token,c.gistId,true);}
+function initSync(){
+  const c=loadSyncCfg();
+  if(c&&c.token&&c.gistId){
+    connectSync(c.token,c.gistId,true);
+  }
+}
 async function connectSync(token,gistId,silent){
   syncToken=token.trim();gistId=(gistId||'').trim();
   try{
@@ -160,7 +215,8 @@ async function connectSync(token,gistId,silent){
     syncGistId=gistId;saveSyncCfg({token:syncToken,gistId:syncGistId});
     updateSyncBtn(true);
     if(pollHandle)clearInterval(pollHandle);
-    await pollOnce();pollHandle=setInterval(pollOnce,5000);
+    await pollOnce(); // initial pull
+    pollHandle=setInterval(pollOnce,5000);
     if(!silent)closeModal();
   }catch(err){
     console.warn('Sync connection error:',err);
@@ -190,12 +246,22 @@ async function pollOnce(){
     const remoteJson=record&&record.json;if(!remoteJson)return;
     if(remoteJson===lastRemoteJson)return;
     const remoteState=JSON.parse(remoteJson);
-    if(remoteState.classOrder.length===0&&state.classOrder.length>0){lastRemoteJson=remoteJson;pushToCloud();return;}
-    lastRemoteJson=remoteJson;applyingRemote=true;
-    state=remoteState;
-    if(!state.classOrder.includes(activeClassId))activeClassId=state.classOrder[0]||null;
-    localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
-    renderAll();applyingRemote=false;
+    const localTime = state._updatedAt || 0;
+    const remoteTime = remoteState._updatedAt || 0;
+    // If remote is newer, apply it; else push local to cloud
+    if(remoteTime > localTime){
+      console.log('Remote is newer, pulling...');
+      lastRemoteJson=remoteJson;applyingRemote=true;
+      state=remoteState;
+      if(!state.classOrder.includes(activeClassId))activeClassId=state.classOrder[0]||null;
+      localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
+      renderAll();applyingRemote=false;
+    } else if(Object.keys(state.classes).length>0){
+      // local is newer or same, push to cloud
+      console.log('Local is newer, pushing...');
+      lastRemoteJson=remoteJson;
+      pushToCloud();
+    }
   }catch(e){console.warn('Poll failed',e);}
 }
 async function pushToCloud(){
@@ -338,322 +404,148 @@ function getP1(stuId,testId){const a=getMark(stuId,testId,'p1a'),b=getMark(stuId
 function getTotal(stuId,testId){const p1=getP1(stuId,testId),p2=getMark(stuId,testId,'p2');return(p1===null||p2===null)?null:p1+p2;}
 function getAL(total){if(total===null||total===undefined)return null;if(total>=90)return 'AL1';if(total>=85)return 'AL2';if(total>=80)return 'AL3';if(total>=75)return 'AL4';if(total>=65)return 'AL5';if(total>=45)return 'AL6';if(total>=20)return 'AL7';return 'AL8';}
 
-// =============== STATISTICS FUNCTIONS ===============
+// =============== STATISTICS ===============
 function getClassStats() {
   const c = getClass();
   if (!c || !c.students.length || !c.tests.length) return null;
-  
   const visibleTests = c.tests.filter(t => !t.hidden);
   if (!visibleTests.length) return null;
-  
-  const stats = {
-    students: c.students.length,
-    tests: visibleTests.length,
-    studentAverages: {},
-    gradeDistribution: { A: 0, B: 0, C: 0, D: 0, F: 0 },
-    testAverages: {},
-    allScores: [],
-    topPerformer: null,
-    topScore: 0,
-    lowScore: 100
-  };
-  
-  let totalScores = 0;
-  let count = 0;
-  
+  const stats = { students: c.students.length, tests: visibleTests.length, studentAverages: {}, gradeDistribution: { A:0, B:0, C:0, D:0, F:0 }, testAverages: {}, allScores: [], topPerformer: null, topScore: 0, lowScore: 100 };
+  let totalScores = 0, count = 0;
   c.students.forEach(student => {
-    let studentTotal = 0;
-    let studentTests = 0;
-    
+    let studentTotal = 0, studentTests = 0;
     visibleTests.forEach(test => {
       const total = getTotal(student.id, test.id);
       if (total !== null) {
-        studentTotal += total;
-        studentTests++;
-        totalScores += total;
-        count++;
+        studentTotal += total; studentTests++; totalScores += total; count++;
         stats.allScores.push(total);
-        
         const grade = total >= 80 ? 'A' : total >= 65 ? 'B' : total >= 50 ? 'C' : total >= 40 ? 'D' : 'F';
         stats.gradeDistribution[grade]++;
-        
         if (total > stats.topScore) stats.topScore = total;
         if (total < stats.lowScore) stats.lowScore = total;
-        
         if (!stats.testAverages[test.id]) stats.testAverages[test.id] = { total: 0, count: 0, name: test.name };
         stats.testAverages[test.id].total += total;
         stats.testAverages[test.id].count++;
       }
     });
-    
-    if (studentTests > 0) {
-      const avg = studentTotal / studentTests;
-      stats.studentAverages[student.id] = { avg, name: student.name, count: studentTests };
-    }
+    if (studentTests > 0) stats.studentAverages[student.id] = { avg: studentTotal/studentTests, name: student.name, count: studentTests };
   });
-  
-  Object.keys(stats.testAverages).forEach(key => {
-    const t = stats.testAverages[key];
-    t.average = t.total / t.count;
-  });
-  
+  Object.keys(stats.testAverages).forEach(key => { stats.testAverages[key].average = stats.testAverages[key].total / stats.testAverages[key].count; });
   stats.classAverage = count > 0 ? (totalScores / count) : 0;
   stats.passRate = ((stats.gradeDistribution.A + stats.gradeDistribution.B + stats.gradeDistribution.C) / count * 100) || 0;
-  
   let topAvg = 0;
-  Object.keys(stats.studentAverages).forEach(key => {
-    const s = stats.studentAverages[key];
-    if (s.avg > topAvg) {
-      topAvg = s.avg;
-      stats.topPerformer = { id: key, name: s.name, avg: s.avg };
-    }
-  });
-  
-  const sorted = [...stats.allScores].sort((a, b) => a - b);
-  stats.median = sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)] : 0;
-  
-  if (stats.allScores.length > 0) {
-    const mean = stats.classAverage;
-    const squareDiffs = stats.allScores.map(value => Math.pow(value - mean, 2));
-    const avgSquareDiff = squareDiffs.reduce((a, b) => a + b, 0) / squareDiffs.length;
-    stats.stdDev = Math.sqrt(avgSquareDiff);
-  } else {
-    stats.stdDev = 0;
-  }
-  
+  Object.keys(stats.studentAverages).forEach(key => { if (stats.studentAverages[key].avg > topAvg) { topAvg = stats.studentAverages[key].avg; stats.topPerformer = { id: key, name: stats.studentAverages[key].name, avg: topAvg }; } });
+  const sorted = [...stats.allScores].sort((a,b)=>a-b);
+  stats.median = sorted.length > 0 ? sorted[Math.floor(sorted.length/2)] : 0;
+  if (stats.allScores.length > 0) { const mean = stats.classAverage; const squareDiffs = stats.allScores.map(v => Math.pow(v-mean,2)); stats.stdDev = Math.sqrt(squareDiffs.reduce((a,b)=>a+b,0)/squareDiffs.length); } else stats.stdDev = 0;
   return stats;
 }
 function getStudentStats(studentId) {
-  const c = getClass();
-  if (!c) return null;
-  
-  const visibleTests = c.tests.filter(t => !t.hidden);
-  const scores = visibleTests.map(t => ({
-    id: t.id,
-    name: t.name,
-    date: t.date,
-    total: getTotal(studentId, t.id)
-  })).filter(d => d.total !== null);
-  
+  const c = getClass(); if (!c) return null;
+  const visibleTests = c.tests.filter(t=>!t.hidden);
+  const scores = visibleTests.map(t => ({ id:t.id, name:t.name, date:t.date, total:getTotal(studentId,t.id) })).filter(d=>d.total!==null);
   if (!scores.length) return null;
-  
-  const totals = scores.map(s => s.total);
-  const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
-  const max = Math.max(...totals);
-  const min = Math.min(...totals);
-  const sorted = [...totals].sort((a, b) => a - b);
-  const median = sorted[Math.floor(sorted.length / 2)];
-  const trend = scores.length > 1 ? scores[scores.length - 1].total - scores[0].total : 0;
-  
+  const totals = scores.map(s=>s.total);
+  const avg = totals.reduce((a,b)=>a+b,0)/totals.length;
+  const max = Math.max(...totals), min = Math.min(...totals);
+  const sorted = [...totals].sort((a,b)=>a-b);
+  const median = sorted[Math.floor(sorted.length/2)];
+  const trend = scores.length > 1 ? scores[scores.length-1].total - scores[0].total : 0;
   const classStats = getClassStats();
   const classAvg = classStats ? classStats.classAverage : 0;
-  
-  return {
-    student: c.students.find(s => s.id === studentId),
-    scores,
-    avg,
-    max,
-    min,
-    median,
-    trend,
-    classAvg,
-    aboveAverage: avg > classAvg
-  };
+  return { student: c.students.find(s=>s.id===studentId), scores, avg, max, min, median, trend, classAvg, aboveAverage: avg > classAvg };
 }
 
-// =============== CHART FUNCTIONS ===============
+// =============== CHARTS ===============
 function drawProgressChart(canvas, studentId) {
-  const c = getClass();
-  if (!c) return;
-  
+  const c = getClass(); if (!c) return;
   const visibleTests = c.tests.filter(t => !t.hidden);
-  const data = visibleTests.map(test => ({
-    name: test.name,
-    date: test.date,
-    total: getTotal(studentId, test.id)
-  })).filter(d => d.total !== null);
-  
+  const data = visibleTests.map(test => ({ name: test.name, date: test.date, total: getTotal(studentId, test.id) })).filter(d => d.total !== null);
   if (data.length < 1) return;
-  
-  const canvasWidth = canvas.width || 500;
-  const canvasHeight = canvas.height || 250;
-  canvas.width = canvasWidth;
-  canvas.height = canvasHeight;
+  const canvasWidth = canvas.width || 500, canvasHeight = canvas.height || 250;
+  canvas.width = canvasWidth; canvas.height = canvasHeight;
   const ctx = canvas.getContext('2d');
-  
   const pad = { top: 20, right: 20, bottom: 50, left: 40 };
-  const chartW = canvasWidth - pad.left - pad.right;
-  const chartH = canvasHeight - pad.top - pad.bottom;
-  
-  const maxScore = 100;
-  const minScore = 0;
-  const range = maxScore - minScore;
-  
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-  
-  for (let i = 0; i <= 4; i++) {
-    const y = pad.top + chartH - (i / 4) * chartH;
-    const value = minScore + (i / 4) * range;
-    ctx.strokeStyle = '#d9d2c2';
-    ctx.lineWidth = 0.5;
-    ctx.beginPath();
-    ctx.moveTo(pad.left, y);
-    ctx.lineTo(pad.left + chartW, y);
-    ctx.stroke();
-    
-    ctx.fillStyle = '#8a8170';
-    ctx.font = '9px Arial';
-    ctx.textAlign = 'right';
-    ctx.fillText(Math.round(value), pad.left - 5, y + 3);
+  const chartW = canvasWidth - pad.left - pad.right, chartH = canvasHeight - pad.top - pad.bottom;
+  const maxScore = 100, minScore = 0, range = maxScore - minScore;
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,canvasWidth,canvasHeight);
+  for (let i=0; i<=4; i++) {
+    const y = pad.top + chartH - (i/4)*chartH;
+    const value = minScore + (i/4)*range;
+    ctx.strokeStyle = '#d9d2c2'; ctx.lineWidth = 0.5; ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left+chartW, y); ctx.stroke();
+    ctx.fillStyle = '#8a8170'; ctx.font = '9px Arial'; ctx.textAlign = 'right'; ctx.fillText(Math.round(value), pad.left-5, y+3);
   }
-  
   const classStats = getClassStats();
   if (classStats && data.length > 1) {
-    ctx.strokeStyle = '#d9d2c2';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = '#d9d2c2'; ctx.lineWidth = 1; ctx.setLineDash([4,4]);
     ctx.beginPath();
-    data.forEach((point, i) => {
-      const x = pad.left + (i / (data.length - 1)) * chartW;
-      const y = pad.top + chartH - ((classStats.classAverage - minScore) / range) * chartH;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+    data.forEach((point,i) => {
+      const x = pad.left + (i/(data.length-1))*chartW;
+      const y = pad.top + chartH - ((classStats.classAverage - minScore)/range)*chartH;
+      if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
     });
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = '#8a8170';
-    ctx.font = '8px Arial';
-    ctx.textAlign = 'left';
-    ctx.fillText('Class avg', pad.left + chartW - 60, pad.top + chartH - ((classStats.classAverage - minScore) / range) * chartH - 5);
+    ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#8a8170'; ctx.font = '8px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('Class avg', pad.left+chartW-60, pad.top+chartH - ((classStats.classAverage - minScore)/range)*chartH - 5);
   }
-  
-  ctx.strokeStyle = '#3563a8';
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  
-  data.forEach((point, i) => {
-    const x = pad.left + (i / (data.length - 1)) * chartW;
-    const y = pad.top + chartH - ((point.total - minScore) / range) * chartH;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+  ctx.strokeStyle = '#3563a8'; ctx.lineWidth = 2.5; ctx.beginPath();
+  data.forEach((point,i) => {
+    const x = pad.left + (i/(data.length-1))*chartW;
+    const y = pad.top + chartH - ((point.total - minScore)/range)*chartH;
+    if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
   });
   ctx.stroke();
-  
-  data.forEach((point, i) => {
-    const x = pad.left + (i / (data.length - 1)) * chartW;
-    const y = pad.top + chartH - ((point.total - minScore) / range) * chartH;
-    
-    ctx.fillStyle = '#3563a8';
-    ctx.beginPath();
-    ctx.arc(x, y, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    
-    ctx.fillStyle = '#1f2a24';
-    ctx.font = 'bold 9px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText(point.total, x, y - 10);
-    
-    ctx.save();
-    ctx.translate(x, canvasHeight - 5);
-    ctx.rotate(-Math.PI / 4);
-    ctx.fillStyle = '#1f2a24';
-    ctx.font = '7px Arial';
-    ctx.textAlign = 'right';
-    const label = point.name.length > 15 ? point.name.slice(0, 13) + '…' : point.name;
-    ctx.fillText(label, 0, 0);
-    ctx.restore();
+  data.forEach((point,i) => {
+    const x = pad.left + (i/(data.length-1))*chartW;
+    const y = pad.top + chartH - ((point.total - minScore)/range)*chartH;
+    ctx.fillStyle = '#3563a8'; ctx.beginPath(); ctx.arc(x,y,5,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#1f2a24'; ctx.font = 'bold 9px Arial'; ctx.textAlign = 'center'; ctx.fillText(point.total, x, y-10);
+    ctx.save(); ctx.translate(x, canvasHeight-5); ctx.rotate(-Math.PI/4);
+    ctx.fillStyle = '#1f2a24'; ctx.font = '7px Arial'; ctx.textAlign = 'right';
+    const label = point.name.length > 15 ? point.name.slice(0,13)+'…' : point.name;
+    ctx.fillText(label, 0, 0); ctx.restore();
   });
 }
 function drawHistogram(canvas, testId) {
-  const c = getClass();
-  if (!c) return;
-  
+  const c = getClass(); if (!c) return;
   const scores = [];
-  c.students.forEach(student => {
-    const total = getTotal(student.id, testId);
-    if (total !== null) scores.push(total);
-  });
-  
-  if (!scores.length) {
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#8a8170';
-    ctx.font = '14px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText('No data available', canvas.width/2, canvas.height/2);
-    return;
-  }
-  
+  c.students.forEach(student => { const total = getTotal(student.id, testId); if (total !== null) scores.push(total); });
+  if (!scores.length) { const ctx = canvas.getContext('2d'); ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.fillStyle='#8a8170'; ctx.font='14px Arial'; ctx.textAlign='center'; ctx.fillText('No data available', canvas.width/2, canvas.height/2); return; }
   const bins = Array(10).fill(0);
-  scores.forEach(score => {
-    const bin = Math.min(Math.floor(score / 10), 9);
-    bins[bin]++;
-  });
-  
+  scores.forEach(score => { const bin = Math.min(Math.floor(score/10),9); bins[bin]++; });
   const maxFreq = Math.max(...bins);
-  const canvasWidth = canvas.width || 500;
-  const canvasHeight = canvas.height || 250;
-  canvas.width = canvasWidth;
-  canvas.height = canvasHeight;
+  const canvasWidth = canvas.width || 500, canvasHeight = canvas.height || 250;
+  canvas.width = canvasWidth; canvas.height = canvasHeight;
   const ctx = canvas.getContext('2d');
-  
-  const barWidth = (canvasWidth - 80) / bins.length;
-  const maxBarHeight = canvasHeight - 60;
-  
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-  
+  const barWidth = (canvasWidth-80)/bins.length;
+  const maxBarHeight = canvasHeight-60;
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,canvasWidth,canvasHeight);
   const colors = ['#e8d5b7','#d4b896','#c09b75','#ac7e54','#986133','#845012','#6f3f0a','#5a2e04','#451d00','#300c00'];
-  bins.forEach((freq, i) => {
-    const x = 40 + i * barWidth;
-    const height = maxFreq > 0 ? maxBarHeight * (freq / maxFreq) : 0;
+  bins.forEach((freq,i) => {
+    const x = 40 + i*barWidth;
+    const height = maxFreq > 0 ? maxBarHeight * (freq/maxFreq) : 0;
     const y = canvasHeight - 20 - height;
-    
-    ctx.fillStyle = colors[i % colors.length];
-    ctx.fillRect(x, y, barWidth - 2, height);
-    ctx.strokeStyle = '#1f2a24';
-    ctx.lineWidth = 0.5;
-    ctx.strokeRect(x, y, barWidth - 2, height);
-    
-    ctx.fillStyle = '#1f2a24';
-    ctx.font = '9px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText(freq, x + barWidth/2, y - 5);
-    ctx.fillText(`${i*10}-${(i+1)*10}`, x + barWidth/2, canvasHeight - 4);
+    ctx.fillStyle = colors[i%colors.length]; ctx.fillRect(x, y, barWidth-2, height);
+    ctx.strokeStyle = '#1f2a24'; ctx.lineWidth = 0.5; ctx.strokeRect(x, y, barWidth-2, height);
+    ctx.fillStyle = '#1f2a24'; ctx.font = '9px Arial'; ctx.textAlign = 'center';
+    ctx.fillText(freq, x+barWidth/2, y-5);
+    ctx.fillText(`${i*10}-${(i+1)*10}`, x+barWidth/2, canvasHeight-4);
   });
-  
-  ctx.strokeStyle = '#1f2a24';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(40, canvasHeight - 20);
-  ctx.lineTo(canvasWidth - 10, canvasHeight - 20);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(40, canvasHeight - 20);
-  ctx.lineTo(40, 10);
-  ctx.stroke();
+  ctx.strokeStyle = '#1f2a24'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(40, canvasHeight-20); ctx.lineTo(canvasWidth-10, canvasHeight-20); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(40, canvasHeight-20); ctx.lineTo(40, 10); ctx.stroke();
 }
 
 // =============== ANALYTICS UI ===============
 function showStudentAnalytics(studentId) {
   const stats = getStudentStats(studentId);
-  if (!stats) {
-    alert('No data available for this student.');
-    return;
-  }
-  
+  if (!stats) { alert('No data available for this student.'); return; }
   const s = stats.student;
   const grade = stats.avg >= 80 ? 'A' : stats.avg >= 65 ? 'B' : stats.avg >= 50 ? 'C' : stats.avg >= 40 ? 'D' : 'F';
   const trendIcon = stats.trend > 0 ? '📈' : stats.trend < 0 ? '📉' : '➡️';
   const trendColor = stats.trend > 0 ? 'var(--done)' : stats.trend < 0 ? '#c9622f' : 'var(--pending)';
-  
-  let html = `
-    <h3>📊 ${esc(s.name)} - Performance Analysis</h3>
+  let html = `<h3>📊 ${esc(s.name)} - Performance Analysis</h3>
     <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(100px,1fr));">
       <div class="stat-card"><div class="stat-label">Average</div><div class="stat-value">${stats.avg.toFixed(1)}</div></div>
       <div class="stat-card"><div class="stat-label">Median</div><div class="stat-value">${stats.median}</div></div>
@@ -666,95 +558,55 @@ function showStudentAnalytics(studentId) {
       <span style="font-weight:700;color:${trendColor};">${trendIcon} Trend: ${stats.trend > 0 ? 'Improving' : stats.trend < 0 ? 'Declining' : 'Stable'}</span>
       <span style="font-size:13px;color:${trendColor};">${stats.trend >= 0 ? '+' : ''}${stats.trend.toFixed(1)} points overall</span>
     </div>
-    <div class="chart-container">
-      <canvas id="progressChartCanvas" width="500" height="250"></canvas>
-    </div>
-    <div class="btn-row">
-      <button class="btn-ghost" onclick="closeModal()">Close</button>
-      <button class="btn-main" onclick="generateWordReport(['${studentId}'])">📄 Generate Report</button>
-    </div>
-  `;
+    <div class="chart-container"><canvas id="progressChartCanvas" width="500" height="250"></canvas></div>
+    <div class="btn-row"><button class="btn-ghost" onclick="closeModal()">Close</button><button class="btn-main" onclick="generateWordReport(['${studentId}'])">📄 Generate Report</button></div>`;
   showModal(html);
-  
-  setTimeout(() => {
-    const canvas = document.getElementById('progressChartCanvas');
-    if (canvas) drawProgressChart(canvas, studentId);
-  }, 50);
+  setTimeout(() => { const canvas = document.getElementById('progressChartCanvas'); if (canvas) drawProgressChart(canvas, studentId); }, 50);
 }
 function showClassAnalytics() {
   const stats = getClassStats();
-  if (!stats) {
-    alert('Not enough data for analytics. Add students and tests first.');
-    return;
-  }
-  
+  if (!stats) { alert('Not enough data for analytics. Add students and tests first.'); return; }
   const gradeColors = {'A':'#3d7a5c','B':'#5a9e7a','C':'#c9622f','D':'#e8a87c','F':'#d9534f'};
   const totalGrades = stats.gradeDistribution.A + stats.gradeDistribution.B + stats.gradeDistribution.C + stats.gradeDistribution.D + stats.gradeDistribution.F;
-  const gradeBars = Object.keys(stats.gradeDistribution).map(g => {
-    const pct = totalGrades > 0 ? (stats.gradeDistribution[g] / totalGrades * 100) : 0;
-    return `<div class="grade-segment" style="width:${pct}%;background:${gradeColors[g]};">${pct > 5 ? g : ''}</div>`;
-  }).join('');
-  
-  // Student ranking
-  const sortedStudents = Object.keys(stats.studentAverages).sort((a,b) => stats.studentAverages[b].avg - stats.studentAverages[a].avg);
-  const rankList = sortedStudents.slice(0, 10).map((id, idx) => {
+  const gradeBars = Object.keys(stats.gradeDistribution).map(g => { const pct = totalGrades > 0 ? (stats.gradeDistribution[g]/totalGrades*100) : 0; return `<div class="grade-segment" style="width:${pct}%;background:${gradeColors[g]};">${pct > 5 ? g : ''}</div>`; }).join('');
+  const sortedStudents = Object.keys(stats.studentAverages).sort((a,b)=>stats.studentAverages[b].avg - stats.studentAverages[a].avg);
+  const rankList = sortedStudents.slice(0,10).map((id,idx) => {
     const s = stats.studentAverages[id];
     const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx+1}.`;
-    return `<div class="student-rank ${idx < 3 ? 'rank-'+(idx+1) : ''}">
-      <span><span class="rank-num">${medal}</span> ${esc(s.name)}</span>
-      <span class="rank-score">${s.avg.toFixed(1)}</span>
-    </div>`;
+    return `<div class="student-rank ${idx < 3 ? 'rank-'+(idx+1) : ''}"><span><span class="rank-num">${medal}</span> ${esc(s.name)}</span><span class="rank-score">${s.avg.toFixed(1)}</span></div>`;
   }).join('');
-  
-  let html = `
-    <h3>📈 Class Analytics - ${esc(getClass().name)}</h3>
-    <div class="tab-row">
-      <button class="tab-btn ${analyticsTab === 'overview' ? 'active' : ''}" onclick="switchAnalyticsTab('overview')">Overview</button>
-      <button class="tab-btn ${analyticsTab === 'ranking' ? 'active' : ''}" onclick="switchAnalyticsTab('ranking')">Ranking</button>
-      <button class="tab-btn ${analyticsTab === 'distribution' ? 'active' : ''}" onclick="switchAnalyticsTab('distribution')">Distribution</button>
-    </div>
-    <div id="analyticsContent">
-  `;
-  
+  let html = `<h3>📈 Class Analytics - ${esc(getClass().name)}</h3><div class="tab-row">
+    <button class="tab-btn ${analyticsTab === 'overview' ? 'active' : ''}" onclick="switchAnalyticsTab('overview')">Overview</button>
+    <button class="tab-btn ${analyticsTab === 'ranking' ? 'active' : ''}" onclick="switchAnalyticsTab('ranking')">Ranking</button>
+    <button class="tab-btn ${analyticsTab === 'distribution' ? 'active' : ''}" onclick="switchAnalyticsTab('distribution')">Distribution</button>
+  </div><div id="analyticsContent">`;
   if (analyticsTab === 'overview') {
-    html += `
-      <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));">
-        <div class="stat-card"><div class="stat-label">Class Average</div><div class="stat-value">${stats.classAverage.toFixed(1)}</div></div>
-        <div class="stat-card"><div class="stat-label">Pass Rate</div><div class="stat-value">${stats.passRate.toFixed(1)}%</div></div>
-        <div class="stat-card"><div class="stat-label">Median</div><div class="stat-value">${stats.median}</div></div>
-        <div class="stat-card"><div class="stat-label">Std Dev</div><div class="stat-value">${stats.stdDev.toFixed(1)}</div></div>
-        <div class="stat-card"><div class="stat-label">Top Score</div><div class="stat-value">${stats.topScore}</div></div>
-        <div class="stat-card"><div class="stat-label">Low Score</div><div class="stat-value">${stats.lowScore}</div></div>
-      </div>
-      <div style="margin-top:8px;">
-        <div style="font-size:11px;color:var(--pending);margin-bottom:4px;">Grade Distribution</div>
-        <div class="grade-bar">${gradeBars}</div>
-        <div style="display:flex;gap:8px;margin-top:4px;font-size:10px;flex-wrap:wrap;">
-          ${Object.keys(stats.gradeDistribution).map(g => `<span><span style="display:inline-block;width:12px;height:12px;background:${gradeColors[g]};border-radius:2px;"></span> ${g}: ${stats.gradeDistribution[g]}</span>`).join('')}
-        </div>
-      </div>
-      <div style="margin-top:12px;">
-        <div style="font-size:11px;color:var(--pending);margin-bottom:4px;">Top Performer</div>
-        <div style="font-size:18px;font-weight:800;">${stats.topPerformer ? esc(stats.topPerformer.name) : '—'} <span style="font-size:14px;color:var(--accent);">(${stats.topPerformer ? stats.topPerformer.avg.toFixed(1) : ''})</span></div>
-      </div>
-    `;
+    html += `<div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));">
+      <div class="stat-card"><div class="stat-label">Class Average</div><div class="stat-value">${stats.classAverage.toFixed(1)}</div></div>
+      <div class="stat-card"><div class="stat-label">Pass Rate</div><div class="stat-value">${stats.passRate.toFixed(1)}%</div></div>
+      <div class="stat-card"><div class="stat-label">Median</div><div class="stat-value">${stats.median}</div></div>
+      <div class="stat-card"><div class="stat-label">Std Dev</div><div class="stat-value">${stats.stdDev.toFixed(1)}</div></div>
+      <div class="stat-card"><div class="stat-label">Top Score</div><div class="stat-value">${stats.topScore}</div></div>
+      <div class="stat-card"><div class="stat-label">Low Score</div><div class="stat-value">${stats.lowScore}</div></div>
+    </div>
+    <div style="margin-top:8px;"><div style="font-size:11px;color:var(--pending);margin-bottom:4px;">Grade Distribution</div>
+    <div class="grade-bar">${gradeBars}</div>
+    <div style="display:flex;gap:8px;margin-top:4px;font-size:10px;flex-wrap:wrap;">
+    ${Object.keys(stats.gradeDistribution).map(g => `<span><span style="display:inline-block;width:12px;height:12px;background:${gradeColors[g]};border-radius:2px;"></span> ${g}: ${stats.gradeDistribution[g]}</span>`).join('')}
+    </div></div>
+    <div style="margin-top:12px;"><div style="font-size:11px;color:var(--pending);margin-bottom:4px;">Top Performer</div>
+    <div style="font-size:18px;font-weight:800;">${stats.topPerformer ? esc(stats.topPerformer.name) : '—'} <span style="font-size:14px;color:var(--accent);">(${stats.topPerformer ? stats.topPerformer.avg.toFixed(1) : ''})</span></div></div>`;
   } else if (analyticsTab === 'ranking') {
     html += `<div style="max-height:300px;overflow-y:auto;">${rankList}</div>`;
   } else if (analyticsTab === 'distribution') {
-    const c = getClass();
-    const visibleTests = c.tests.filter(t => !t.hidden);
+    const c = getClass(); const visibleTests = c.tests.filter(t=>!t.hidden);
     html += `<div style="margin-bottom:8px;"><select id="histTestSelect" onchange="updateHistogram()" style="width:100%;">`;
-    visibleTests.forEach(t => {
-      html += `<option value="${t.id}">${esc(t.name)}</option>`;
-    });
-    html += `</select></div>`;
-    html += `<div class="chart-container"><canvas id="histogramCanvas" width="500" height="250"></canvas></div>`;
-    html += `<script>setTimeout(updateHistogram, 50);<\/script>`;
+    visibleTests.forEach(t => { html += `<option value="${t.id}">${esc(t.name)}</option>`; });
+    html += `</select></div><div class="chart-container"><canvas id="histogramCanvas" width="500" height="250"></canvas></div>
+    <script>setTimeout(updateHistogram, 50);<\/script>`;
   }
-  
   html += `</div><div class="btn-row"><button class="btn-ghost" onclick="closeModal()">Close</button></div>`;
   showModal(html);
-  
   if (analyticsTab === 'distribution') {
     window.updateHistogram = function() {
       const sel = document.getElementById('histTestSelect');
@@ -764,12 +616,9 @@ function showClassAnalytics() {
     };
   }
 }
-function switchAnalyticsTab(tab) {
-  analyticsTab = tab;
-  showClassAnalytics();
-}
+function switchAnalyticsTab(tab) { analyticsTab = tab; showClassAnalytics(); }
 
-// RENDER
+// =============== RENDER ===============
 function renderAll(){renderClassRow();renderContent();}
 function renderContent(){
   const content=document.getElementById('content');const c=getClass();
@@ -818,49 +667,43 @@ function renderTable(){
   const visible=c.tests.filter(t=>!t.hidden);
   if(!visible.length){wrap.innerHTML='<div class="empty-state">Add a test above to start recording marks.</div>';return;}
   if(!c.students.length){wrap.innerHTML='<div class="empty-state">Add students above.</div>';return;}
-  
-  let h = '<table><thead>';
-  h += '<tr><th rowspan="2" style="text-align:left;width:80px;min-width:80px;">Student</th>';
+  let h='<table><thead><tr><th rowspan="2" style="text-align:left;width:80px;min-width:80px;">Student</th>';
   visible.forEach(t => {
-    const lk = !!t.locked;
-    h += `<th colspan="5" class="test-hd">${esc(t.name)}<br><span style="font-weight:400;font-size:10px;color:var(--pending);">${t.date||''}</span>
+    const lk=!!t.locked;
+    h+=`<th colspan="5" class="test-hd">${esc(t.name)}<br><span style="font-weight:400;font-size:10px;color:var(--pending);">${t.date||''}</span>
       <br><span style="display:inline-flex;gap:2px;margin-top:2px;">
         <button class="btn-ghost" style="font-size:10px;padding:2px 5px;" onclick="toggleTestLock('${t.id}')">${lk?'🔒':'🔓'}</button>
         <button class="btn-ghost" style="font-size:10px;padding:2px 5px;" onclick="hideTest('${t.id}')">👁 Hide</button>
         ${lk?'':`<button class="btn-ghost" style="font-size:10px;padding:2px 5px;" onclick="deleteTest('${t.id}')">✕</button>`}
       </span></th>`;
   });
-  h += '</tr><tr>';
-  visible.forEach(t => {
-    h += `<th class="clickable p1h" onclick="openMarkEntry('${t.id}','p1a')">1A</th>
-          <th class="clickable p1h" onclick="openMarkEntry('${t.id}','p1b')">1B</th>
-          <th class="p1h" style="color:var(--done);">P1</th>
-          <th class="clickable p2h" onclick="openMarkEntry('${t.id}','p2')">P2</th>
-          <th class="toth" style="color:var(--perfect);">Total</th>`;
+  h+='</tr><tr>';
+  visible.forEach(t=>{
+    h+=`<th class="clickable p1h" onclick="openMarkEntry('${t.id}','p1a')">1A</th>
+        <th class="clickable p1h" onclick="openMarkEntry('${t.id}','p1b')">1B</th>
+        <th class="p1h" style="color:var(--done);">P1</th>
+        <th class="clickable p2h" onclick="openMarkEntry('${t.id}','p2')">P2</th>
+        <th class="toth" style="color:var(--perfect);">Total</th>`;
   });
-  h += '</tr></thead><tbody>';
-  c.students.forEach(s => {
-    h += `<tr><td>${esc(s.name)} <button class="del-btn" onclick="deleteStudent('${s.id}')">✕</button></td>`;
-    visible.forEach(t => {
-      const a=getMark(s.id,t.id,'p1a');
-      const b=getMark(s.id,t.id,'p1b');
-      const p1=getP1(s.id,t.id);
-      const p2=getMark(s.id,t.id,'p2');
-      const tot=getTotal(s.id,t.id);
+  h+='</tr></thead><tbody>';
+  c.students.forEach(s=>{
+    h+=`<tr><td>${esc(s.name)} <button class="del-btn" onclick="deleteStudent('${s.id}')">✕</button></td>`;
+    visible.forEach(t=>{
+      const a=getMark(s.id,t.id,'p1a'), b=getMark(s.id,t.id,'p1b'), p1=getP1(s.id,t.id), p2=getMark(s.id,t.id,'p2'), tot=getTotal(s.id,t.id);
       const totClass=tot!==null&&tot<50?'red-total':tot!==null?'entered':'computed';
-      h += `<td class="${a!==null?'entered':''}">${fmt(a)}</td>
-            <td class="${b!==null?'entered':''}">${fmt(b)}</td>
-            <td class="${p1!==null?'entered':'computed'}">${fmt(p1)}</td>
-            <td class="${p2!==null?'entered':''}">${fmt(p2)}</td>
-            <td class="${totClass}">${fmt(tot)}</td>`;
+      h+=`<td class="${a!==null?'entered':''}">${fmt(a)}</td>
+          <td class="${b!==null?'entered':''}">${fmt(b)}</td>
+          <td class="${p1!==null?'entered':'computed'}">${fmt(p1)}</td>
+          <td class="${p2!==null?'entered':''}">${fmt(p2)}</td>
+          <td class="${totClass}">${fmt(tot)}</td>`;
     });
-    h += '</tr>';
+    h+='</tr>';
   });
-  h += '</tbody></table>';
-  wrap.innerHTML = h;
+  h+='</tbody></table>';
+  wrap.innerHTML=h;
 }
 
-// MARK ENTRY MODAL - AUTO-SAVE ON TAP
+// =============== MARK ENTRY ===============
 function openMarkEntry(testId,paper){mmTestId=testId;mmPaper=paper;mmStuId=null;mmScore=null;mmView='students';renderMarkModal();}
 function renderMarkModal(){
   const c=getClass();const t=c&&c.tests.find(t=>t.id===mmTestId);if(!t)return;
@@ -896,88 +739,34 @@ function renderMarkModal(){
       <div class="mark-grid">${markBtns}</div>`);
   }
 }
-function switchPaper(paper){
-  if(mmView==='picker') commitScore();
-  mmPaper=paper;
-  if(mmView==='picker'){
-    const v=getMark(mmStuId,mmTestId,mmPaper);
-    mmScore=v!==null?v:null;
-  }
-  renderMarkModal();
-}
+function switchPaper(paper){ if(mmView==='picker') commitScore(); mmPaper=paper; if(mmView==='picker'){ const v=getMark(mmStuId,mmTestId,mmPaper); mmScore=v!==null?v:null; } renderMarkModal(); }
 function openMarkPicker(stuId){mmStuId=stuId;mmView='picker';const v=getMark(stuId,mmTestId,mmPaper);mmScore=v!==null?v:null;renderMarkModal();}
-function tapMark(val){
-  mmScore = val;
-  if (mmStuId && mmTestId && mmPaper) {
-    setMarkData(mmStuId, mmTestId, mmPaper, mmScore);
-    renderTable();
-  }
-  renderMarkModal();
-}
-function tapHalf(){
-  if(mmScore===null) mmScore = 0.5;
-  else if(mmScore%1===0.5) mmScore = Math.floor(mmScore);
-  else mmScore += 0.5;
-  if (mmStuId && mmTestId && mmPaper) {
-    setMarkData(mmStuId, mmTestId, mmPaper, mmScore);
-    renderTable();
-  }
-  renderMarkModal();
-}
-function clearScore(){
-  mmScore = null;
-  if (mmStuId && mmTestId && mmPaper) {
-    setMarkData(mmStuId, mmTestId, mmPaper, null);
-    renderTable();
-  }
-  renderMarkModal();
-}
-function commitScore(){
-  if(mmStuId && mmTestId){
-    setMarkData(mmStuId, mmTestId, mmPaper, mmScore);
-    renderTable();
-  }
-}
-function doneWithStudent(){
-  commitScore();
-  mmView='students';
-  mmStuId=null;
-  mmScore=null;
-  renderMarkModal();
-}
+function tapMark(val){ mmScore = val; if (mmStuId && mmTestId && mmPaper) { setMarkData(mmStuId, mmTestId, mmPaper, mmScore); renderTable(); } renderMarkModal(); }
+function tapHalf(){ if(mmScore===null) mmScore=0.5; else if(mmScore%1===0.5) mmScore=Math.floor(mmScore); else mmScore+=0.5; if (mmStuId && mmTestId && mmPaper) { setMarkData(mmStuId, mmTestId, mmPaper, mmScore); renderTable(); } renderMarkModal(); }
+function clearScore(){ mmScore=null; if (mmStuId && mmTestId && mmPaper) { setMarkData(mmStuId, mmTestId, mmPaper, null); renderTable(); } renderMarkModal(); }
+function commitScore(){ if(mmStuId && mmTestId){ setMarkData(mmStuId, mmTestId, mmPaper, mmScore); renderTable(); } }
+function doneWithStudent(){ commitScore(); mmView='students'; mmStuId=null; mmScore=null; renderMarkModal(); }
 
-// EXPORT CSV
+// =============== EXPORT CSV ===============
 function exportAnalyticsCSV() {
-  const c = getClass();
-  if (!c) return;
-  const stats = getClassStats();
-  if (!stats) { alert('No data to export.'); return; }
-  
+  const c = getClass(); if (!c) return; const stats = getClassStats(); if (!stats) { alert('No data to export.'); return; }
   let csv = 'Student,Average,High,Low,Trend,Grade\n';
   Object.keys(stats.studentAverages).forEach(id => {
     const s = stats.studentAverages[id];
-    const student = c.students.find(st => st.id === id);
-    if (!student) return;
+    const student = c.students.find(st => st.id === id); if (!student) return;
     const scores = c.tests.filter(t => !t.hidden).map(t => getTotal(id, t.id)).filter(v => v !== null);
-    const high = scores.length ? Math.max(...scores) : 0;
-    const low = scores.length ? Math.min(...scores) : 0;
+    const high = scores.length ? Math.max(...scores) : 0; const low = scores.length ? Math.min(...scores) : 0;
     const trend = scores.length > 1 ? scores[scores.length-1] - scores[0] : 0;
     const grade = s.avg >= 80 ? 'A' : s.avg >= 65 ? 'B' : s.avg >= 50 ? 'C' : s.avg >= 40 ? 'D' : 'F';
     csv += `"${student.name}",${s.avg.toFixed(1)},${high},${low},${trend.toFixed(1)},${grade}\n`;
   });
-  
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${c.name}_analytics.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  const a = document.createElement('a'); a.href = url; a.download = `${c.name}_analytics.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
-// =============== WORD REPORT (with AL column) ===============
+// =============== WORD REPORT ===============
 function drawChart(canvas,stuId,tests){
   const barW=26,barGap=2,grpGap=18,grpW=3*(barW+barGap)+grpGap;
   const padL=38,padT=28,padB=85,padR=16,chartH=280,CHART_MAX=100;
@@ -1034,9 +823,7 @@ async function generateWordReport(stuIds){
     paragraphs.push(dp(`Class: ${c.name}`));
     paragraphs.push(dp(`Date: ${new Date().toLocaleDateString()}`));
     paragraphs.push(dp(''));
-    // Headers now include AL
     const hdrs=['Test','Date','Paper 1A','Paper 1B','Paper 1','Paper 2','Total','AL'];
-    // Build rows with AL
     const rows=visible.map(t=>{
       const total=getTotal(stuId,t.id);
       const al = (total!==null) ? getAL(total) : '—';
@@ -1051,7 +838,6 @@ async function generateWordReport(stuIds){
         al
       ];
     });
-    // Adjust column widths: added AL column with width 600
     paragraphs.push(dtable(hdrs, rows, [2200,1200,850,850,850,850,800,600]));
     paragraphs.push(dp(''));
     paragraphs.push(dp('Performance chart',{bold:true}));
@@ -1085,6 +871,9 @@ document.getElementById('addClassBtn').onclick=()=>{const i=document.getElementB
 document.getElementById('newClassName').addEventListener('keydown',e=>{if(e.key==='Enter'){addClass(e.target.value);e.target.value='';}});
 renderAll();
 initSync();
+
+console.log('Data stored in localStorage key:', STORAGE_KEY);
+console.log('Current data:', state);
 </script>
 </body>
 </html>
