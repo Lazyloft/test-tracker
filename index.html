@@ -44,7 +44,7 @@ td:first-child{text-align:left;min-width:80px;width:80px;}
 .del-btn{background:none;color:var(--pending);font-size:13px;padding:1px 4px;border-radius:4px;border:none;cursor:pointer;}
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:50;padding:12px;}
 .modal-overlay.show{display:flex;}
-.modal{background:white;border-radius:14px;padding:16px;max-width:700px;width:100%;max-height:90vh;overflow-y:auto;}
+.modal{background:white;border-radius:14px;padding:16px;max-width:650px;width:100%;max-height:90vh;overflow-y:auto;}
 .modal h3{margin:0 0 8px;font-size:16px;}
 .modal p{font-size:13px;color:var(--pending);margin:0 0 10px;}
 .paper-toggle-row{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;}
@@ -123,7 +123,9 @@ let analyticsTab='overview';
 const PAPER_LABEL={'p1a':'Paper 1A','p1b':'Paper 1B','p2':'Paper 2'};
 const PAPER_MAX={'p1a':26,'p1b':25,'p2':55};
 
-// Analytics selection state
+// Report & Analytics selection state
+let reportSelectedStudents = new Set();
+let reportSelectedTests = new Set();
 let analyticsSelectedStudents = new Set();
 
 function loadState(){
@@ -153,9 +155,6 @@ function closeModal(){
     mmStuId = null;
     mmScore = null;
   }
-  // Reset report selection state
-  reportStudentModalOpen = false;
-  reportTestModalOpen = false;
   document.getElementById('modalOverlay').classList.remove('show');
 }
 function fmt(v){return(v===null||v===undefined)?'—':v;}
@@ -415,6 +414,7 @@ function setMarkData(stuId,testId,paper,value){
 function getP1(stuId,testId){const a=getMark(stuId,testId,'p1a'),b=getMark(stuId,testId,'p1b');return(a===null||b===null)?null:a+b;}
 function getTotal(stuId,testId){const p1=getP1(stuId,testId),p2=getMark(stuId,testId,'p2');return(p1===null||p2===null)?null:p1+p2;}
 function getAL(total){if(total===null||total===undefined)return null;if(total>=90)return 'AL1';if(total>=85)return 'AL2';if(total>=80)return 'AL3';if(total>=75)return 'AL4';if(total>=65)return 'AL5';if(total>=45)return 'AL6';if(total>=20)return 'AL7';return 'AL8';}
+function getVisibleTests(){const c=getClass();return c?c.tests.filter(t=>!t.hidden):[];}
 
 // =============== STATISTICS ===============
 function getClassStats() {
@@ -549,107 +549,61 @@ function drawHistogram(canvas, testId) {
   ctx.beginPath(); ctx.moveTo(40, canvasHeight-20); ctx.lineTo(40, 10); ctx.stroke();
 }
 
-// =============== STUDENT ANALYTICS (NEW) ===============
-function showAnalyticsSelectionModal(){
-  const c = getClass();
-  if(!c){ alert('No class loaded.'); return; }
-  if(!c.students.length){ alert('No students in this class.'); return; }
-  analyticsSelectedStudents = new Set();
-  renderAnalyticsSelectionModal();
-}
-
-function renderAnalyticsSelectionModal(){
-  const c = getClass();
-  if(!c) return;
-  const allSelected = c.students.every(s => analyticsSelectedStudents.has(s.id));
-  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-    <h3 style="margin:0;">📊 Select Students for Analytics</h3>
-    <button class="btn-ghost" style="font-size:12px;padding:5px 12px;" onclick="toggleAllAnalyticsStudents()">${allSelected ? 'Deselect All' : 'All'}</button>
-  </div>
-  <div class="student-selection-count">${analyticsSelectedStudents.size} student(s) selected</div>
-  <div class="stu-grid" style="max-height:300px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:8px;">`;
-  c.students.forEach(s => {
-    const sel = analyticsSelectedStudents.has(s.id) ? 'sel' : '';
-    html += `<button class="stu-btn ${sel}" onclick="toggleAnalyticsStudent('${s.id}')">${esc(s.name)}</button>`;
-  });
-  html += `</div>
-    <div class="btn-row" style="margin-top:12px;">
-      <button class="btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn-main" onclick="generateAnalyticsPreview()">📊 Generate</button>
-    </div>`;
-  showModal(html);
-}
-
-function toggleAnalyticsStudent(stuId){
-  if(analyticsSelectedStudents.has(stuId)) analyticsSelectedStudents.delete(stuId);
-  else analyticsSelectedStudents.add(stuId);
-  renderAnalyticsSelectionModal();
-}
-
-function toggleAllAnalyticsStudents(){
-  const c = getClass();
-  if(!c) return;
-  const allSelected = c.students.every(s => analyticsSelectedStudents.has(s.id));
-  if(allSelected){
-    analyticsSelectedStudents.clear();
-  } else {
-    c.students.forEach(s => analyticsSelectedStudents.add(s.id));
+// =============== CLASS ANALYTICS ===============
+function showClassAnalytics() {
+  const stats = getClassStats();
+  if (!stats) { alert('Not enough data for analytics. Add students and tests first.'); return; }
+  const gradeColors = {'A':'#3d7a5c','B':'#5a9e7a','C':'#c9622f','D':'#e8a87c','F':'#d9534f'};
+  const totalGrades = stats.gradeDistribution.A + stats.gradeDistribution.B + stats.gradeDistribution.C + stats.gradeDistribution.D + stats.gradeDistribution.F;
+  const gradeBars = Object.keys(stats.gradeDistribution).map(g => { const pct = totalGrades > 0 ? (stats.gradeDistribution[g]/totalGrades*100) : 0; return `<div class="grade-segment" style="width:${pct}%;background:${gradeColors[g]};">${pct > 5 ? g : ''}</div>`; }).join('');
+  const sortedStudents = Object.keys(stats.studentAverages).sort((a,b)=>stats.studentAverages[b].avg - stats.studentAverages[a].avg);
+  const rankList = sortedStudents.slice(0,10).map((id,idx) => {
+    const s = stats.studentAverages[id];
+    const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx+1}.`;
+    return `<div class="student-rank ${idx < 3 ? 'rank-'+(idx+1) : ''}"><span><span class="rank-num">${medal}</span> ${esc(s.name)}</span><span class="rank-score">${s.avg.toFixed(1)}</span></div>`;
+  }).join('');
+  let html = `<h3>📈 Class Analytics - ${esc(getClass().name)}</h3><div class="tab-row">
+    <button class="tab-btn ${analyticsTab === 'overview' ? 'active' : ''}" onclick="switchAnalyticsTab('overview')">Overview</button>
+    <button class="tab-btn ${analyticsTab === 'ranking' ? 'active' : ''}" onclick="switchAnalyticsTab('ranking')">Ranking</button>
+    <button class="tab-btn ${analyticsTab === 'distribution' ? 'active' : ''}" onclick="switchAnalyticsTab('distribution')">Distribution</button>
+  </div><div id="analyticsContent">`;
+  if (analyticsTab === 'overview') {
+    html += `<div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));">
+      <div class="stat-card"><div class="stat-label">Class Average</div><div class="stat-value">${stats.classAverage.toFixed(1)}</div></div>
+      <div class="stat-card"><div class="stat-label">Pass Rate</div><div class="stat-value">${stats.passRate.toFixed(1)}%</div></div>
+      <div class="stat-card"><div class="stat-label">Median</div><div class="stat-value">${stats.median}</div></div>
+      <div class="stat-card"><div class="stat-label">Std Dev</div><div class="stat-value">${stats.stdDev.toFixed(1)}</div></div>
+      <div class="stat-card"><div class="stat-label">Top Score</div><div class="stat-value">${stats.topScore}</div></div>
+      <div class="stat-card"><div class="stat-label">Low Score</div><div class="stat-value">${stats.lowScore}</div></div>
+    </div>
+    <div style="margin-top:8px;"><div style="font-size:11px;color:var(--pending);margin-bottom:4px;">Grade Distribution</div>
+    <div class="grade-bar">${gradeBars}</div>
+    <div style="display:flex;gap:8px;margin-top:4px;font-size:10px;flex-wrap:wrap;">
+    ${Object.keys(stats.gradeDistribution).map(g => `<span><span style="display:inline-block;width:12px;height:12px;background:${gradeColors[g]};border-radius:2px;"></span> ${g}: ${stats.gradeDistribution[g]}</span>`).join('')}
+    </div></div>
+    <div style="margin-top:12px;"><div style="font-size:11px;color:var(--pending);margin-bottom:4px;">Top Performer</div>
+    <div style="font-size:18px;font-weight:800;">${stats.topPerformer ? esc(stats.topPerformer.name) : '—'} <span style="font-size:14px;color:var(--accent);">(${stats.topPerformer ? stats.topPerformer.avg.toFixed(1) : ''})</span></div></div>`;
+  } else if (analyticsTab === 'ranking') {
+    html += `<div style="max-height:300px;overflow-y:auto;">${rankList}</div>`;
+  } else if (analyticsTab === 'distribution') {
+    const c = getClass(); const visibleTests = c.tests.filter(t=>!t.hidden);
+    html += `<div style="margin-bottom:8px;"><select id="histTestSelect" onchange="updateHistogram()" style="width:100%;">`;
+    visibleTests.forEach(t => { html += `<option value="${t.id}">${esc(t.name)}</option>`; });
+    html += `</select></div><div class="chart-container"><canvas id="histogramCanvas" width="500" height="250"></canvas></div>
+    <script>setTimeout(updateHistogram, 50);<\/script>`;
   }
-  renderAnalyticsSelectionModal();
-}
-
-function generateAnalyticsPreview(){
-  if(analyticsSelectedStudents.size === 0){ alert('Please select at least one student.'); return; }
-  const studentIds = Array.from(analyticsSelectedStudents);
-  closeModal(); // close selection modal
-  
-  // Build preview content
-  const c = getClass();
-  if(!c) return;
-  const visibleTests = c.tests.filter(t => !t.hidden);
-  if(!visibleTests.length){ alert('No visible tests to display.'); return; }
-  
-  let html = `<h3>📊 Student Analytics Preview</h3>
-    <p>Showing ${studentIds.length} student(s).</p>`;
-  
-  studentIds.forEach((stuId, idx) => {
-    const s = c.students.find(st => st.id === stuId);
-    if(!s) return;
-    html += `<div class="analytics-student-block">
-      <h4>${esc(s.name)}</h4>
-      <div class="table-scroll">`;
-    // Build table
-    html += `<table><thead><tr><th>Test</th><th>Date</th><th>1A</th><th>1B</th><th>P1</th><th>P2</th><th>Total</th><th>AL</th></tr></thead><tbody>`;
-    visibleTests.forEach(t => {
-      const total = getTotal(stuId, t.id);
-      const al = (total!==null) ? getAL(total) : '—';
-      html += `<tr>
-        <td>${esc(t.name)}</td>
-        <td>${esc(t.date||'')}</td>
-        <td>${fmt(getMark(stuId,t.id,'p1a'))}</td>
-        <td>${fmt(getMark(stuId,t.id,'p1b'))}</td>
-        <td>${fmt(getP1(stuId,t.id))}</td>
-        <td>${fmt(getMark(stuId,t.id,'p2'))}</td>
-        <td>${fmt(total)}</td>
-        <td>${al}</td>
-      </tr>`;
-    });
-    html += `</tbody></table></div>`;
-    // Chart
-    html += `<div class="chart-container"><canvas id="analyticsChart_${idx}" width="500" height="250"></canvas></div>`;
-    html += `</div>`;
-  });
-  html += `<div class="btn-row"><button class="btn-ghost" onclick="closeModal()">Close</button></div>`;
+  html += `</div><div class="btn-row"><button class="btn-ghost" onclick="closeModal()">Close</button></div>`;
   showModal(html);
-  
-  // Draw charts after modal renders
-  setTimeout(() => {
-    studentIds.forEach((stuId, idx) => {
-      const canvas = document.getElementById(`analyticsChart_${idx}`);
-      if(canvas) drawChart(canvas, stuId, visibleTests);
-    });
-  }, 50);
+  if (analyticsTab === 'distribution') {
+    window.updateHistogram = function() {
+      const sel = document.getElementById('histTestSelect');
+      if (!sel) return;
+      const canvas = document.getElementById('histogramCanvas');
+      if (canvas) drawHistogram(canvas, sel.value);
+    };
+  }
 }
+function switchAnalyticsTab(tab) { analyticsTab = tab; showClassAnalytics(); }
 
 // =============== RENDER ===============
 function renderAll(){renderClassRow();renderContent();}
@@ -674,10 +628,14 @@ function renderContent(){
     </div>
     <div class="panel"><h2>Score sheet</h2><div class="table-scroll" id="tableWrap"></div></div>
     <div class="panel"><h2>Reports</h2>
-      <div class="row-f"><select id="reportStuSel"></select><button class="btn-ghost" id="genOneBtn">Word report (1 student)</button></div>
-      <div class="row-f"><button class="btn-main" id="genAllBtn">Word report (all students)</button></div>
+      <div class="row-f">
+        <button class="btn-main" onclick="showAllStudentsReportModal()">📄 All Students</button>
+        <button class="btn-main" onclick="showSelectedStudentsModal()">📄 Selected Students</button>
+      </div>
       <div class="row-f" style="margin-top:8px;">
         <button class="btn-main" onclick="showAnalyticsSelectionModal()">📊 Student Analytics</button>
+        <button class="btn-ghost" onclick="showStudentAnalytics(document.getElementById('reportStuSel').value)" style="flex:1;">📊 Individual Analytics</button>
+        <select id="reportStuSel" style="flex:1;"></select>
       </div>
     </div>`;
   document.getElementById('newTestDate').value=new Date().toISOString().slice(0,10);
@@ -685,8 +643,6 @@ function renderContent(){
   document.getElementById('newStuName').addEventListener('keydown',e=>{if(e.key==='Enter'){addStudent(e.target.value);e.target.value='';}});
   document.getElementById('addTestBtn').onclick=()=>{const n=document.getElementById('newTestName'),d=document.getElementById('newTestDate');addTest(n.value,d.value);n.value='';};
   document.getElementById('unhideBtn').onclick=showUnhidePanel;
-  document.getElementById('genOneBtn').onclick=()=>{const s=document.getElementById('reportStuSel');if(!s.value){alert('Select a student.');return;}generateWordReport([s.value]);};
-  document.getElementById('genAllBtn').onclick=()=>{const c=getClass();if(!c||!c.students.length){alert('No students.');return;}generateWordReport(c.students.map(s=>s.id));};
   renderTable();renderReportSel();
 }
 function renderReportSel(){
@@ -799,11 +755,221 @@ function exportAnalyticsCSV() {
   document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
-// =============== REPORT FUNCTIONS (Word) ===============
-// ... (existing report functions: showAllStudentsReportModal, showSelectedStudentsModal, etc.)
-// These are unchanged; we keep them as they are.
+// =============== STUDENT ANALYTICS (NEW) ===============
+function showAnalyticsSelectionModal(){
+  const c = getClass();
+  if(!c){ alert('No class loaded.'); return; }
+  if(!c.students.length){ alert('No students in this class.'); return; }
+  analyticsSelectedStudents = new Set();
+  renderAnalyticsSelectionModal();
+}
+function renderAnalyticsSelectionModal(){
+  const c = getClass(); if(!c) return;
+  const allSelected = c.students.every(s => analyticsSelectedStudents.has(s.id));
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+    <h3 style="margin:0;">📊 Select Students for Analytics</h3>
+    <button class="btn-ghost" style="font-size:12px;padding:5px 12px;" onclick="toggleAllAnalyticsStudents()">${allSelected ? 'Deselect All' : 'All'}</button>
+  </div>
+  <div class="student-selection-count">${analyticsSelectedStudents.size} student(s) selected</div>
+  <div class="stu-grid" style="max-height:300px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:8px;">`;
+  c.students.forEach(s => {
+    const sel = analyticsSelectedStudents.has(s.id) ? 'sel' : '';
+    html += `<button class="stu-btn ${sel}" onclick="toggleAnalyticsStudent('${s.id}')">${esc(s.name)}</button>`;
+  });
+  html += `</div>
+    <div class="btn-row" style="margin-top:12px;">
+      <button class="btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn-main" onclick="generateAnalyticsPreview()">📊 Generate</button>
+    </div>`;
+  showModal(html);
+}
+function toggleAnalyticsStudent(stuId){
+  if(analyticsSelectedStudents.has(stuId)) analyticsSelectedStudents.delete(stuId);
+  else analyticsSelectedStudents.add(stuId);
+  renderAnalyticsSelectionModal();
+}
+function toggleAllAnalyticsStudents(){
+  const c = getClass(); if(!c) return;
+  const allSelected = c.students.every(s => analyticsSelectedStudents.has(s.id));
+  if(allSelected){ analyticsSelectedStudents.clear(); } 
+  else { c.students.forEach(s => analyticsSelectedStudents.add(s.id)); }
+  renderAnalyticsSelectionModal();
+}
+function generateAnalyticsPreview(){
+  if(analyticsSelectedStudents.size === 0){ alert('Please select at least one student.'); return; }
+  const studentIds = Array.from(analyticsSelectedStudents);
+  closeModal();
+  const c = getClass(); if(!c) return;
+  const visibleTests = c.tests.filter(t => !t.hidden);
+  if(!visibleTests.length){ alert('No visible tests to display.'); return; }
+  let html = `<h3>📊 Student Analytics Preview</h3><p>Showing ${studentIds.length} student(s).</p>`;
+  studentIds.forEach((stuId, idx) => {
+    const s = c.students.find(st => st.id === stuId); if(!s) return;
+    html += `<div class="analytics-student-block"><h4>${esc(s.name)}</h4><div class="table-scroll"><table><thead><tr><th>Test</th><th>Date</th><th>1A</th><th>1B</th><th>P1</th><th>P2</th><th>Total</th><th>AL</th></tr></thead><tbody>`;
+    visibleTests.forEach(t => {
+      const total = getTotal(stuId, t.id);
+      const al = (total!==null) ? getAL(total) : '—';
+      html += `<tr><td>${esc(t.name)}</td><td>${esc(t.date||'')}</td><td>${fmt(getMark(stuId,t.id,'p1a'))}</td><td>${fmt(getMark(stuId,t.id,'p1b'))}</td><td>${fmt(getP1(stuId,t.id))}</td><td>${fmt(getMark(stuId,t.id,'p2'))}</td><td>${fmt(total)}</td><td>${al}</td></tr>`;
+    });
+    html += `</tbody></table></div><div class="chart-container"><canvas id="analyticsChart_${idx}" width="500" height="250"></canvas></div></div>`;
+  });
+  html += `<div class="btn-row"><button class="btn-ghost" onclick="closeModal()">Close</button></div>`;
+  showModal(html);
+  setTimeout(() => {
+    studentIds.forEach((stuId, idx) => {
+      const canvas = document.getElementById(`analyticsChart_${idx}`);
+      if(canvas) drawChart(canvas, stuId, visibleTests);
+    });
+  }, 50);
+}
 
-// =============== WORD REPORT ===============
+// =============== INDIVIDUAL STUDENT ANALYTICS ===============
+function showStudentAnalytics(studentId) {
+  const stats = getStudentStats(studentId);
+  if (!stats) { alert('No data available for this student.'); return; }
+  const s = stats.student;
+  const grade = stats.avg >= 80 ? 'A' : stats.avg >= 65 ? 'B' : stats.avg >= 50 ? 'C' : stats.avg >= 40 ? 'D' : 'F';
+  const trendIcon = stats.trend > 0 ? '📈' : stats.trend < 0 ? '📉' : '➡️';
+  const trendColor = stats.trend > 0 ? 'var(--done)' : stats.trend < 0 ? '#c9622f' : 'var(--pending)';
+  let html = `<h3>📊 ${esc(s.name)} - Performance Analysis</h3>
+    <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(100px,1fr));">
+      <div class="stat-card"><div class="stat-label">Average</div><div class="stat-value">${stats.avg.toFixed(1)}</div></div>
+      <div class="stat-card"><div class="stat-label">Median</div><div class="stat-value">${stats.median}</div></div>
+      <div class="stat-card"><div class="stat-label">Highest</div><div class="stat-value">${stats.max}</div></div>
+      <div class="stat-card"><div class="stat-label">Lowest</div><div class="stat-value">${stats.min}</div></div>
+      <div class="stat-card"><div class="stat-label">Grade</div><div class="stat-value" style="color:${grade==='A'?'var(--done)':grade==='F'?'red':'var(--accent)'};">${grade}</div></div>
+      <div class="stat-card"><div class="stat-label">vs Class Avg</div><div class="stat-value" style="color:${stats.aboveAverage?'var(--done)':'red'};">${stats.aboveAverage?'+'+ (stats.avg - stats.classAvg).toFixed(1) : (stats.avg - stats.classAvg).toFixed(1)}</div></div>
+    </div>
+    <div style="background:${trendColor}20;padding:10px;border-radius:8px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-weight:700;color:${trendColor};">${trendIcon} Trend: ${stats.trend > 0 ? 'Improving' : stats.trend < 0 ? 'Declining' : 'Stable'}</span>
+      <span style="font-size:13px;color:${trendColor};">${stats.trend >= 0 ? '+' : ''}${stats.trend.toFixed(1)} points overall</span>
+    </div>
+    <div class="chart-container"><canvas id="progressChartCanvas" width="500" height="250"></canvas></div>
+    <div class="btn-row"><button class="btn-ghost" onclick="closeModal()">Close</button><button class="btn-main" onclick="generateWordReport(['${studentId}'])">📄 Generate Report</button></div>`;
+  showModal(html);
+  setTimeout(() => { const canvas = document.getElementById('progressChartCanvas'); if (canvas) drawProgressChart(canvas, studentId); }, 50);
+}
+
+// =============== REPORT FUNCTIONS ===============
+
+// All Students – test selection then generate
+function showAllStudentsReportModal(){
+  const tests = getVisibleTests();
+  if(!tests.length){ alert('No visible tests to report.'); return; }
+  let html = `<h3>📄 Report for All Students</h3>
+    <p>Select the tests to include in the report.</p>
+    <div style="margin:8px 0;">
+      <label style="font-weight:600;cursor:pointer;"><input type="checkbox" id="selectAllTestsAll" checked onchange="toggleAllTestsAll()"> Select All</label>
+    </div>
+    <div style="max-height:250px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:4px;">`;
+  tests.forEach(t => {
+    html += `<div class="report-test-check">
+      <input type="checkbox" id="test_${t.id}" value="${t.id}" checked>
+      <label for="test_${t.id}">${esc(t.name)} ${t.date ? ' ('+esc(t.date)+')' : ''}</label>
+    </div>`;
+  });
+  html += `</div>
+    <div class="btn-row" style="margin-top:12px;">
+      <button class="btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn-main" onclick="generateAllStudentsReport()">📄 Generate</button>
+    </div>`;
+  showModal(html);
+}
+function toggleAllTestsAll(){
+  const checked = document.getElementById('selectAllTestsAll').checked;
+  document.querySelectorAll('#modalBody input[type=checkbox][id^="test_"]').forEach(cb => cb.checked = checked);
+}
+function generateAllStudentsReport(){
+  const c = getClass(); if(!c){ alert('No class loaded.'); return; }
+  const checked = document.querySelectorAll('#modalBody input[type=checkbox][id^="test_"]:checked');
+  const testIds = Array.from(checked).map(cb => cb.value);
+  if(!testIds.length){ alert('Please select at least one test.'); return; }
+  closeModal();
+  const studentIds = c.students.map(s => s.id);
+  if(!studentIds.length){ alert('No students in this class.'); return; }
+  generateWordReport(studentIds, testIds);
+}
+
+// Selected Students
+function showSelectedStudentsModal(){
+  const c = getClass(); if(!c){ alert('No class loaded.'); return; }
+  if(!c.students.length){ alert('No students in this class.'); return; }
+  const tests = getVisibleTests();
+  if(!tests.length){ alert('No visible tests to report.'); return; }
+  reportSelectedStudents = new Set();
+  reportSelectedTests = new Set(tests.map(t => t.id));
+  renderSelectedStudentsModal();
+}
+function renderSelectedStudentsModal(){
+  const c = getClass(); if(!c) return;
+  const tests = getVisibleTests();
+  const testNames = tests.filter(t => reportSelectedTests.has(t.id)).map(t => t.name).join(', ') || 'None selected';
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+    <h3 style="margin:0;">📄 Select Students</h3>
+    <button class="btn-ghost" style="font-size:12px;padding:5px 12px;" onclick="showTestSelectionModalForStudents()">📋 Select Test</button>
+  </div>
+  <p style="font-size:12px;color:var(--pending);">Selected tests: ${esc(testNames)}</p>
+  <div class="student-selection-count">${reportSelectedStudents.size} student(s) selected</div>
+  <div class="stu-grid" style="max-height:280px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:8px;">`;
+  c.students.forEach(s => {
+    const sel = reportSelectedStudents.has(s.id) ? 'sel' : '';
+    html += `<button class="stu-btn ${sel}" onclick="toggleReportStudent('${s.id}')">${esc(s.name)}</button>`;
+  });
+  html += `</div>
+    <div class="btn-row" style="margin-top:12px;">
+      <button class="btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn-main" onclick="generateSelectedStudentsReport()">📄 Generate</button>
+    </div>`;
+  showModal(html);
+}
+function toggleReportStudent(stuId){
+  if(reportSelectedStudents.has(stuId)) reportSelectedStudents.delete(stuId);
+  else reportSelectedStudents.add(stuId);
+  renderSelectedStudentsModal();
+}
+function showTestSelectionModalForStudents(){
+  const tests = getVisibleTests();
+  if(!tests.length){ alert('No visible tests.'); return; }
+  let html = `<h3>📋 Select Tests</h3>
+    <p>Choose which tests to include in the report.</p>
+    <div style="margin:8px 0;">
+      <label style="font-weight:600;cursor:pointer;"><input type="checkbox" id="selectAllTestsSel" ${tests.every(t=>reportSelectedTests.has(t.id))?'checked':''} onchange="toggleAllTestsSel()"> Select All</label>
+    </div>
+    <div style="max-height:250px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:4px;">`;
+  tests.forEach(t => {
+    const checked = reportSelectedTests.has(t.id) ? 'checked' : '';
+    html += `<div class="report-test-check">
+      <input type="checkbox" id="seltest_${t.id}" value="${t.id}" ${checked}>
+      <label for="seltest_${t.id}">${esc(t.name)} ${t.date ? ' ('+esc(t.date)+')' : ''}</label>
+    </div>`;
+  });
+  html += `</div>
+    <div class="btn-row" style="margin-top:12px;">
+      <button class="btn-ghost" onclick="closeModal();renderSelectedStudentsModal();">Cancel</button>
+      <button class="btn-main" onclick="applyTestSelectionForStudents()">Apply</button>
+    </div>`;
+  showModal(html);
+}
+function toggleAllTestsSel(){
+  const checked = document.getElementById('selectAllTestsSel').checked;
+  document.querySelectorAll('#modalBody input[type=checkbox][id^="seltest_"]').forEach(cb => cb.checked = checked);
+}
+function applyTestSelectionForStudents(){
+  const checked = document.querySelectorAll('#modalBody input[type=checkbox][id^="seltest_"]:checked');
+  reportSelectedTests = new Set(Array.from(checked).map(cb => cb.value));
+  closeModal();
+  renderSelectedStudentsModal();
+}
+function generateSelectedStudentsReport(){
+  if(reportSelectedStudents.size === 0){ alert('Please select at least one student.'); return; }
+  if(reportSelectedTests.size === 0){ alert('Please select at least one test.'); return; }
+  const studentIds = Array.from(reportSelectedStudents);
+  const testIds = Array.from(reportSelectedTests);
+  closeModal();
+  generateWordReport(studentIds, testIds);
+}
+
+// =============== WORD REPORT ENGINE ===============
 function drawChart(canvas,stuId,tests){
   const barW=26,barGap=2,grpGap=18,grpW=3*(barW+barGap)+grpGap;
   const padL=38,padT=28,padB=85,padR=16,chartH=280,CHART_MAX=100;
@@ -847,16 +1013,13 @@ const sigBlock=`<w:tbl><w:tblPr><w:tblW w:w="9638" w:type="dxa"/><w:tblLayout w:
 async function generateWordReport(stuIds, testIds){
   const c=getClass();
   if(!c||!c.tests.length){alert('No tests yet.');return;}
-  
   let tests;
   if(testIds && testIds.length){
     tests = c.tests.filter(t => testIds.includes(t.id) && !t.hidden);
   } else {
     tests = c.tests.filter(t => !t.hidden);
   }
-  
   if(!tests.length){ alert('No selected tests with data.'); return; }
-  
   const canvas=document.getElementById('offscreenChart');
   const paragraphs=[], imageRels=[], imageFiles=[];
   let relIdx=2;
@@ -912,11 +1075,6 @@ async function generateWordReport(stuIds, testIds){
   a.download=`${fname}_test_report.docx`;
   document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
 }
-
-// The report modal functions (showAllStudentsReportModal, etc.) are unchanged – they rely on generateWordReport with selected tests.
-// We keep them as they are from previous version.
-// I'll include them briefly but they are identical to earlier code.
-// Since they are long, I'll assume they are still present; for brevity I'll omit re-pasting them here, but they are in the full HTML.
 
 // INIT
 document.getElementById('addClassBtn').onclick=()=>{const i=document.getElementById('newClassName');addClass(i.value);i.value='';};
