@@ -806,7 +806,7 @@ function renderTable(){
   });
   h += '</tr>';
   
-  // Second row: sub-headers for each test, no student cell because of rowspan
+  // Second row: sub-headers for each test
   h += '<tr>';
   visible.forEach(t => {
     h += `<th class="clickable p1h" onclick="openMarkEntry('${t.id}','p1a')">1A</th>
@@ -840,7 +840,7 @@ function renderTable(){
   wrap.innerHTML = h;
 }
 
-// MARK ENTRY MODAL
+// MARK ENTRY MODAL - FIXED: commit on close
 function openMarkEntry(testId,paper){mmTestId=testId;mmPaper=paper;mmStuId=null;mmScore=null;mmView='students';renderMarkModal();}
 function renderMarkModal(){
   const c=getClass();const t=c&&c.tests.find(t=>t.id===mmTestId);if(!t)return;
@@ -872,16 +872,33 @@ function renderMarkModal(){
         <button class="btn-ghost" onclick="clearScore()">Clear</button>
         <button class="btn-ghost" onclick="doneWithStudent()">← Back</button>
       </div>
-      <div class="mark-grid">${markBtns}</div>`);
+      <div class="mark-grid">${markBtns}</div>
+      <div class="btn-row" style="margin-top:8px;">
+        <button class="btn-main" onclick="commitAndCloseModal()">✔ Save & Close</button>
+        <button class="btn-ghost" onclick="closeModal()">Close without saving</button>
+      </div>`);
   }
 }
-function switchPaper(paper){if(mmView==='picker')commitScore();mmPaper=paper;if(mmView==='picker'){const v=getMark(mmStuId,mmTestId,mmPaper);mmScore=v!==null?v:null;}renderMarkModal();}
+function switchPaper(paper){
+  if(mmView==='picker') commitScore();
+  mmPaper=paper;
+  if(mmView==='picker'){
+    const v=getMark(mmStuId,mmTestId,mmPaper);
+    mmScore=v!==null?v:null;
+  }
+  renderMarkModal();
+}
 function openMarkPicker(stuId){mmStuId=stuId;mmView='picker';const v=getMark(stuId,mmTestId,mmPaper);mmScore=v!==null?v:null;renderMarkModal();}
 function tapMark(val){mmScore=val;renderMarkModal();}
 function tapHalf(){if(mmScore===null)mmScore=0.5;else if(mmScore%1===0.5)mmScore=Math.floor(mmScore);else mmScore+=0.5;renderMarkModal();}
 function clearScore(){mmScore=null;renderMarkModal();}
 function commitScore(){if(mmStuId&&mmTestId){setMarkData(mmStuId,mmTestId,mmPaper,mmScore);renderTable();}}
 function doneWithStudent(){commitScore();mmView='students';mmStuId=null;mmScore=null;renderMarkModal();}
+// New function: commit and close modal
+function commitAndCloseModal(){
+  commitScore();
+  closeModal();
+}
 
 // EXPORT CSV
 function exportAnalyticsCSV() {
