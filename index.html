@@ -136,7 +136,7 @@ function closeModal(){
 }
 function fmt(v){return(v===null||v===undefined)?'—':v;}
 
-// SYNC
+// SYNC with better error handling
 let syncToken='',syncGistId='',pollHandle=null,applyingRemote=false,lastRemoteJson=null;
 function loadSyncCfg(){try{const r=localStorage.getItem(SYNC_CFG_KEY);if(r)return JSON.parse(r);}catch(e){}return null;}
 function saveSyncCfg(c){localStorage.setItem(SYNC_CFG_KEY,JSON.stringify(c));}
@@ -149,7 +149,11 @@ async function connectSync(token,gistId,silent){
         headers:{'Authorization':'token '+syncToken,'Content-Type':'application/json','Accept':'application/vnd.github+json'},
         body:JSON.stringify({description:'Test Tracker data',public:false,
           files:{'testTracker.json':{content:JSON.stringify({json:JSON.stringify(state),updatedAt:Date.now()})}}})});
-      if(!res.ok){const e=await res.json();throw new Error(e.message||'Status '+res.status);}
+      if(!res.ok){
+        if(res.status===403) throw new Error('403 Forbidden – check token scope (needs gist)');
+        const e=await res.json();
+        throw new Error(e.message||'Status '+res.status);
+      }
       const d=await res.json();gistId=d.id;
       alert('Sync database created!\n\nGist ID: '+gistId+'\n\nWrite this down — enter it on your other device to link them.');
     }
@@ -158,14 +162,29 @@ async function connectSync(token,gistId,silent){
     if(pollHandle)clearInterval(pollHandle);
     await pollOnce();pollHandle=setInterval(pollOnce,5000);
     if(!silent)closeModal();
-  }catch(err){console.warn(err);updateSyncBtn(false);if(!silent)alert('Could not connect.\n\n'+err.message);}
+  }catch(err){
+    console.warn('Sync connection error:',err);
+    syncToken=''; syncGistId=''; // disable sync
+    updateSyncBtn(false);
+    if(!silent) alert('Could not connect.\n\n'+err.message);
+  }
 }
 async function pollOnce(){
   if(!syncToken||!syncGistId)return;
   try{
     const res=await fetch('https://api.github.com/gists/'+syncGistId,
       {headers:{'Authorization':'token '+syncToken,'Accept':'application/vnd.github+json'}});
-    if(!res.ok)return;
+    if(!res.ok){
+      if(res.status===403){
+        // token invalid/expired – disable sync
+        console.warn('Sync disabled: 403 Forbidden');
+        syncToken=''; syncGistId=''; 
+        if(pollHandle) clearInterval(pollHandle);
+        updateSyncBtn(false);
+        return;
+      }
+      return;
+    }
     const data=await res.json();
     const file=data.files&&data.files['testTracker.json'];if(!file)return;
     const record=JSON.parse(file.content);
@@ -183,10 +202,17 @@ async function pollOnce(){
 async function pushToCloud(){
   if(!syncToken||!syncGistId||applyingRemote)return;
   const json=JSON.stringify(state);lastRemoteJson=json;
-  try{await fetch('https://api.github.com/gists/'+syncGistId,{method:'PATCH',
-    headers:{'Authorization':'token '+syncToken,'Content-Type':'application/json','Accept':'application/vnd.github+json'},
-    body:JSON.stringify({files:{'testTracker.json':{content:JSON.stringify({json,updatedAt:Date.now()})}}})});}
-  catch(e){console.warn('Push failed',e);}
+  try{
+    const res=await fetch('https://api.github.com/gists/'+syncGistId,{method:'PATCH',
+      headers:{'Authorization':'token '+syncToken,'Content-Type':'application/json','Accept':'application/vnd.github+json'},
+      body:JSON.stringify({files:{'testTracker.json':{content:JSON.stringify({json,updatedAt:Date.now()})}}})});
+    if(!res.ok && res.status===403){
+      console.warn('Push failed: 403 Forbidden – disabling sync');
+      syncToken=''; syncGistId='';
+      if(pollHandle) clearInterval(pollHandle);
+      updateSyncBtn(false);
+    }
+  }catch(e){console.warn('Push failed',e);}
 }
 function updateSyncBtn(on){const b=document.getElementById('syncStatusBtn');if(b)b.textContent=on?'☁️ Sync: On':'☁️ Sync: Off';}
 function showSyncPanel(){
@@ -313,7 +339,6 @@ function getP1(stuId,testId){const a=getMark(stuId,testId,'p1a'),b=getMark(stuId
 function getTotal(stuId,testId){const p1=getP1(stuId,testId),p2=getMark(stuId,testId,'p2');return(p1===null||p2===null)?null:p1+p2;}
 
 // =============== STATISTICS FUNCTIONS ===============
-
 function getClassStats() {
   const c = getClass();
   if (!c || !c.students.length || !c.tests.length) return null;
@@ -398,7 +423,6 @@ function getClassStats() {
   
   return stats;
 }
-
 function getStudentStats(studentId) {
   const c = getClass();
   if (!c) return null;
@@ -438,7 +462,6 @@ function getStudentStats(studentId) {
 }
 
 // =============== CHART FUNCTIONS ===============
-
 function drawProgressChart(canvas, studentId) {
   const c = getClass();
   if (!c) return;
@@ -545,7 +568,6 @@ function drawProgressChart(canvas, studentId) {
     ctx.restore();
   });
 }
-
 function drawHistogram(canvas, testId) {
   const c = getClass();
   if (!c) return;
@@ -618,7 +640,6 @@ function drawHistogram(canvas, testId) {
 }
 
 // =============== ANALYTICS UI ===============
-
 function showStudentAnalytics(studentId) {
   const stats = getStudentStats(studentId);
   if (!stats) {
@@ -660,7 +681,6 @@ function showStudentAnalytics(studentId) {
     if (canvas) drawProgressChart(canvas, studentId);
   }, 50);
 }
-
 function showClassAnalytics() {
   const stats = getClassStats();
   if (!stats) {
@@ -744,7 +764,6 @@ function showClassAnalytics() {
     };
   }
 }
-
 function switchAnalyticsTab(tab) {
   analyticsTab = tab;
   showClassAnalytics();
@@ -801,7 +820,6 @@ function renderTable(){
   if(!c.students.length){wrap.innerHTML='<div class="empty-state">Add students above.</div>';return;}
   
   let h = '<table><thead>';
-  // First row: student header with rowspan=2, then test headers spanning 5 columns
   h += '<tr><th rowspan="2" style="text-align:left;width:80px;min-width:80px;">Student</th>';
   visible.forEach(t => {
     const lk = !!t.locked;
@@ -812,10 +830,7 @@ function renderTable(){
         ${lk?'':`<button class="btn-ghost" style="font-size:10px;padding:2px 5px;" onclick="deleteTest('${t.id}')">✕</button>`}
       </span></th>`;
   });
-  h += '</tr>';
-  
-  // Second row: sub-headers for each test
-  h += '<tr>';
+  h += '</tr><tr>';
   visible.forEach(t => {
     h += `<th class="clickable p1h" onclick="openMarkEntry('${t.id}','p1a')">1A</th>
           <th class="clickable p1h" onclick="openMarkEntry('${t.id}','p1b')">1B</th>
@@ -824,8 +839,6 @@ function renderTable(){
           <th class="toth" style="color:var(--perfect);">Total</th>`;
   });
   h += '</tr></thead><tbody>';
-  
-  // Student rows
   c.students.forEach(s => {
     h += `<tr><td>${esc(s.name)} <button class="del-btn" onclick="deleteStudent('${s.id}')">✕</button></td>`;
     visible.forEach(t => {
@@ -843,7 +856,6 @@ function renderTable(){
     });
     h += '</tr>';
   });
-  
   h += '</tbody></table>';
   wrap.innerHTML = h;
 }
@@ -898,9 +910,9 @@ function tapMark(val){
   mmScore = val;
   if (mmStuId && mmTestId && mmPaper) {
     setMarkData(mmStuId, mmTestId, mmPaper, mmScore);
-    renderTable(); // update the scoresheet behind the modal
+    renderTable();
   }
-  renderMarkModal(); // update display
+  renderMarkModal();
 }
 function tapHalf(){
   if(mmScore===null) mmScore = 0.5;
