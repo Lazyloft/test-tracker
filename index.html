@@ -125,7 +125,16 @@ function uid(p){return(p||'x')+'_'+Math.random().toString(36).slice(2,9);}
 function esc(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 function escX(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[m]));}
 function showModal(html){document.getElementById('modalBody').innerHTML=html;document.getElementById('modalOverlay').classList.add('show');}
-function closeModal(){document.getElementById('modalOverlay').classList.remove('show');}
+function closeModal(){
+  // If we are in the picker view, save any pending score before closing
+  if (mmView === 'picker') {
+    commitScore();
+    mmView = 'students';
+    mmStuId = null;
+    mmScore = null;
+  }
+  document.getElementById('modalOverlay').classList.remove('show');
+}
 function fmt(v){return(v===null||v===undefined)?'—':v;}
 
 // SYNC
@@ -840,7 +849,7 @@ function renderTable(){
   wrap.innerHTML = h;
 }
 
-// MARK ENTRY MODAL - FIXED: commit on close
+// MARK ENTRY MODAL
 function openMarkEntry(testId,paper){mmTestId=testId;mmPaper=paper;mmStuId=null;mmScore=null;mmView='students';renderMarkModal();}
 function renderMarkModal(){
   const c=getClass();const t=c&&c.tests.find(t=>t.id===mmTestId);if(!t)return;
@@ -871,12 +880,9 @@ function renderMarkModal(){
         <button class="half-btn${hasHalf?' on':''}" onclick="tapHalf()">+0.5</button>
         <button class="btn-ghost" onclick="clearScore()">Clear</button>
         <button class="btn-ghost" onclick="doneWithStudent()">← Back</button>
+        <button class="btn-ghost" onclick="closeModal()">Close</button>
       </div>
-      <div class="mark-grid">${markBtns}</div>
-      <div class="btn-row" style="margin-top:8px;">
-        <button class="btn-main" onclick="commitAndCloseModal()">✔ Save & Close</button>
-        <button class="btn-ghost" onclick="closeModal()">Close without saving</button>
-      </div>`);
+      <div class="mark-grid">${markBtns}</div>`);
   }
 }
 function switchPaper(paper){
@@ -894,11 +900,6 @@ function tapHalf(){if(mmScore===null)mmScore=0.5;else if(mmScore%1===0.5)mmScore
 function clearScore(){mmScore=null;renderMarkModal();}
 function commitScore(){if(mmStuId&&mmTestId){setMarkData(mmStuId,mmTestId,mmPaper,mmScore);renderTable();}}
 function doneWithStudent(){commitScore();mmView='students';mmStuId=null;mmScore=null;renderMarkModal();}
-// New function: commit and close modal
-function commitAndCloseModal(){
-  commitScore();
-  closeModal();
-}
 
 // EXPORT CSV
 function exportAnalyticsCSV() {
